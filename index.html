@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>HELL FIGHT</title>
+<title>BOSS FIGHTS</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; color: #fff;
     font-family: "Courier New", monospace; overflow: hidden; touch-action: none; }
@@ -12,35 +12,36 @@
     align-items: center; justify-content: center; background: rgba(0,0,0,0.85);
     text-align: center; padding: 24px; }
   #overlay.hidden { display: none; }
-  #overlay h1 { color: #ff3344; font-size: 46px; margin: 0 0 12px; letter-spacing: 4px;
+  #title { color: #ff3344; font-size: 46px; margin: 0 0 14px; letter-spacing: 4px;
     text-shadow: 0 0 18px #ff3344, 0 0 40px #880011; }
-  #overlay p { max-width: 460px; line-height: 1.5; opacity: 0.85; }
-  #diffRow { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
-  button { margin-top: 18px; background: none; color: #fff; border: 2px solid #fff;
-    padding: 10px 28px; font: inherit; font-size: 18px; cursor: pointer; }
-  button:hover { background: #fff; color: #000; }
-  button[data-diff="easy"] { border-color: #7fd7ff; color: #7fd7ff; }
-  button[data-diff="easy"]:hover { background: #7fd7ff; color: #000; }
-  button[data-diff="hell"] { border-color: #ff3344; color: #ff3344; }
-  button[data-diff="hell"]:hover { background: #ff3344; color: #000; }
-  #caption { font-size: 14px; margin-top: 22px; opacity: 0.6; }
+  #stat { min-height: 1.5em; opacity: 0.75; margin: 0 0 6px; }
+  #menu { display: flex; flex-direction: column; gap: 12px; align-items: center; margin-top: 10px; }
+  #menu button { min-width: 260px; background: none; color: var(--c, #fff);
+    border: 2px solid var(--c, #fff); padding: 10px 28px; font: inherit; font-size: 18px; cursor: pointer; }
+  #menu button:hover { background: var(--c, #fff); color: #000; }
+  #overlay { background: radial-gradient(ellipse at center, rgba(0,0,0,0.25) 0%, rgba(0,0,0,0.8) 75%); }
+  #title { animation: flicker 5s infinite; }
+  @keyframes flicker {
+    0%, 100% { opacity: 1; } 47% { opacity: 1; } 48% { opacity: 0.6; }
+    50% { opacity: 1; } 84% { opacity: 1; } 85% { opacity: 0.7; } 86% { opacity: 1; }
+  }
+  #stat { text-transform: uppercase; letter-spacing: 2px; font-size: 14px; }
+  #menu button { min-width: 280px; letter-spacing: 3px; text-transform: uppercase; font-weight: bold;
+    transition: transform 0.15s, box-shadow 0.15s, background 0.15s, color 0.15s;
+    box-shadow: 0 0 10px rgba(0,0,0,0.6); }
+  #menu button:hover { box-shadow: 0 0 22px var(--c, #fff); transform: translateY(-2px) scale(1.03); }
+  #menu button:active { transform: scale(0.98); }
+  body::after { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 10;
+    background: repeating-linear-gradient(to bottom, rgba(255,255,255,0.035) 0px,
+      rgba(255,255,255,0.035) 1px, transparent 1px, transparent 3px); }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <div id="overlay">
-  <div>
-    <h1 id="title">HELL FIGHT</h1>
-    <p id="msg">THE WARDEN has no mercy and no healing. Attacks are random, they stack,
-      and they get faster. You have 48 HP and every hit costs 4. Survive 90 seconds.
-      Arrow keys / WASD or drag to move. Shift to dash (1 second cooldown), and you cannot be hit while dashing. Sometimes the arena stretches wider or taller. That does not count toward the attack limit.</p>
-    <div id="diffRow">
-      <button data-diff="easy">EASY</button>
-      <button data-diff="normal">NORMAL</button>
-      <button data-diff="hell">HELL</button>
-    </div>
-    <p id="caption">EASY: up to 4 attacks at once · NORMAL: up to 6 · HELL: up to 9</p>
-  </div>
+  <h1 id="title">SELECT FIGHT</h1>
+  <p id="stat"></p>
+  <div id="menu"></div>
 </div>
 
 <script>
@@ -48,933 +49,1712 @@ const canvas = document.getElementById("c");
 const ctx = canvas.getContext("2d");
 const overlay = document.getElementById("overlay");
 const titleEl = document.getElementById("title");
-const msgEl = document.getElementById("msg");
-const diffRow = document.getElementById("diffRow");
+const statEl = document.getElementById("stat");
+const menuEl = document.getElementById("menu");
 
 const W = 640, H = 480;
 canvas.width = W; canvas.height = H;
 
-const BASE_BOX = { x: 150, y: 130, w: 340, h: 280 };
-let BOX = { ...BASE_BOX };      // changes size while the arena stretches
-const SURVIVE = 90;
-const MAX_HP = 48;
-const HIT_DMG = 4;
-const INVULN = 0.6;
-const SPEED = 230;
-const DASH_SPEED = 900;
-const DASH_TIME = 0.15;
-const DASH_COOLDOWN = 1.0;
-const EYE_RANGE = 800;
-const MAX_ATTACKS_PER_TICK = 2;
-const LONG_EVERY = 6;
-const STRAIGHT_MAX = 3;
-
-// warn = telegraph time multiplier, spawn = time between attacks multiplier,
+// Shared difficulty presets. warn = telegraph multiplier, spawn = time between attacks,
 // speed = bullet speed multiplier, maxAttacks = attacks allowed on screen at once
 const PRESETS = {
   easy:   { warn: 1.4,  spawn: 1.6, speed: 0.75, maxAttacks: 4 },
   normal: { warn: 0.75, spawn: 0.7, speed: 1.25, maxAttacks: 6 },
   hell:   { warn: 0.6,  spawn: 0.5, speed: 1.4,  maxAttacks: 9 }
 };
-let DIFF = PRESETS.normal;
-let selectedDiff = "normal";
 
-let state, heart, keys = {}, pointerTarget = null;
-let fx = [];
-let clock = 0;               // real time, used for visual animation (keeps running on menus)
-const embers = Array.from({ length: 60 }, () => newEmber(true));
+const input = { keys: {} };
+let active = null;        // fight currently running (stays behind the end screen)
+let endScreen = false;    // true while the end-of-fight menu is showing
+let lastLaunch = null;    // { fight, diff } so RETRY knows what to restart
 
-function rand(a, b) { return a + Math.random() * (b - a); }
-function dist(ax, ay, bx, by) { return Math.hypot(ax - bx, ay - by); }
-function intensity() { return Math.min(1, state.time / SURVIVE); }
-
-function newEmber(anywhere) {
-  return { x: rand(0, W), y: anywhere ? rand(0, H) : H + 10,
-    vy: rand(10, 35), s: rand(0.8, 2.2), a: rand(0.15, 0.5) };
-}
-
-function reset() {
-  state = {
-    running: false, time: 0, hp: MAX_HP, invuln: 0, shake: 0, flash: 0,
-    cooldown: 1.0, lasers: [], bullets: [], longCount: 0, gid: 0,
-    dashCd: 0, dashT: 0, dashDx: 0, dashDy: -1, dashTrail: [],
-    stretchCd: 12, stretchT: 0, stretchAxis: "h", stretchAmt: 0
-  };
-  BOX = { ...BASE_BOX };
-  heart = { x: BOX.x + BOX.w / 2, y: BOX.y + BOX.h / 2, r: 6 };
-  pointerTarget = null;
-  fx = [];
-}
-reset();
-
-// ---------- HELPERS ----------
-function clampHeart() {
-  heart.x = Math.max(BOX.x + heart.r, Math.min(BOX.x + BOX.w - heart.r, heart.x));
-  heart.y = Math.max(BOX.y + heart.r, Math.min(BOX.y + BOX.h - heart.r, heart.y));
-}
-
-function inRect(px, py, r, rect) {
-  return px > rect.x - r && px < rect.x + rect.w + r && py > rect.y - r && py < rect.y + rect.h + r;
-}
-
-function distToSegment(px, py, x1, y1, x2, y2) {
-  const dx = x2 - x1, dy = y2 - y1;
-  const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)));
-  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
-}
-
-// Every attack gets an id so the cap counts attacks, not individual bullets
-function pushLaser(l) { l.gid = ++state.gid; state.lasers.push(l); return l; }
-function addGroup(arr) { const g = ++state.gid; for (const b of arr) b.group = g; state.bullets.push(...arr); }
-
-function eyeActive() {
-  return state.lasers.some(l => l.kind === "eye" && l.age < l.warn + l.fire + 0.1);
-}
-
-function straightActive() {
-  return state.lasers.filter(l => (l.kind === "h" || l.kind === "v") && l.age < l.warn + l.fire + 0.1).length;
-}
-
-function activeAttacks() {
-  const ids = new Set();
-  for (const l of state.lasers) if (l.age < l.warn + l.fire + 0.1) ids.add(l.gid);
-  for (const b of state.bullets) if (b.group) ids.add(b.group);
-  return ids.size;
-}
-
-function eyeSegment(l) {
-  const a = l.a + l.spin * (l.age - l.warn);
-  return { x1: l.ox, y1: l.oy, x2: l.ox + Math.cos(a) * EYE_RANGE, y2: l.oy + Math.sin(a) * EYE_RANGE };
-}
-
-// ---------- PARTICLES ----------
-function burst(x, y, color, n, speed, life) {
-  for (let i = 0; i < n; i++) {
-    const a = rand(0, Math.PI * 2), sp = rand(speed * 0.3, speed);
-    fx.push({ type: "spark", x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
-      life, max: life, color, size: rand(1.5, 3.5) });
+// ---------- MENUS ----------
+function showMenu(title, stat, buttons) {
+  titleEl.textContent = title;
+  statEl.textContent = stat || "";
+  menuEl.innerHTML = "";
+  for (const b of buttons) {
+    const el = document.createElement("button");
+    el.textContent = b.label;
+    el.style.setProperty("--c", b.color);
+    el.addEventListener("click", b.onClick);
+    menuEl.appendChild(el);
   }
+  overlay.classList.remove("hidden");
 }
 
-function ring(x, y, r0, r1, color, life) {
-  fx.push({ type: "ring", x, y, r0, r1, color, life, max: life });
+function showFightSelect() {
+  active = null;
+  endScreen = false;
+  titleEl.style.color = "";
+  titleEl.style.textShadow = "";
+  showMenu("SELECT FIGHT", "", [
+    { label: "THE WARDEN", color: "#ff3344", onClick: () => showDifficulty(WARDEN) },
+    { label: "SKRULL DEATH", color: "#9dff5c", onClick: () => showDifficulty(SKRULL) },
+    { label: "CRYSTAL SERAPH", color: "#9fe8ff", onClick: () => showDifficulty(SERAPH) }
+  ]);
 }
 
-function spark1(x, y, vx, vy, color, life) {
-  fx.push({ type: "spark", x, y, vx, vy, life, max: life, color, size: 1.8 });
+function showDifficulty(fight) {
+  endScreen = false;
+  const accent = fight === WARDEN ? "#ff3344" : fight === SKRULL ? "#9dff5c" : "#9fe8ff";
+  titleEl.style.color = accent;
+  titleEl.style.textShadow = "0 0 18px " + accent + ", 0 0 40px " + accent;
+  showMenu(fight.name, "", [
+    { label: "EASY", color: "#7fd7ff", onClick: () => launch(fight, "easy") },
+    { label: "NORMAL", color: "#9dff5c", onClick: () => launch(fight, "normal") },
+    { label: "HELL", color: "#ff3344", onClick: () => launch(fight, "hell") },
+    { label: "BACK", color: "#ffffff", onClick: () => showFightSelect() }
+  ]);
 }
 
-function updateFx(dt) {
-  for (const p of fx) {
-    p.life -= dt;
-    if (p.type === "spark") {
-      p.x += p.vx * dt; p.y += p.vy * dt;
-      p.vx *= 0.92; p.vy *= 0.92;
-    }
+function launch(fight, diff) {
+  lastLaunch = { fight, diff };
+  endScreen = false;
+  active = fight;
+  overlay.classList.add("hidden");
+  fight.start(diff);
+}
+
+// Called by a fight when the player dies or survives
+function endFight(title, stat) {
+  endScreen = true;
+  showMenu(title, stat, [
+    { label: "RETRY", color: "#ffffff", onClick: () => launch(lastLaunch.fight, lastLaunch.diff) },
+    { label: "MENU", color: "#ffffff", onClick: () => showFightSelect() }
+  ]);
+}
+
+// ---------- INPUT ----------
+function toArena(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  return { x: (clientX - rect.left) * (W / rect.width), y: (clientY - rect.top) * (H / rect.height) };
+}
+canvas.addEventListener("pointerdown", (e) => { if (active) active.setPointer(toArena(e.clientX, e.clientY)); });
+canvas.addEventListener("pointermove", (e) => {
+  if (active && (e.buttons || e.pointerType === "touch")) active.setPointer(toArena(e.clientX, e.clientY));
+});
+canvas.addEventListener("pointerup", () => { if (active) active.setPointer(null); });
+canvas.addEventListener("pointerleave", () => { if (active) active.setPointer(null); });
+
+window.addEventListener("keydown", (e) => {
+  input.keys[e.code] = true;
+  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(e.key)) e.preventDefault();
+  if (active && active.isRunning()) {
+    if (e.key === "Shift") active.dash();
+    if (e.key === "Escape") { active.stop(); showFightSelect(); }
+  } else if (endScreen && e.key === "Enter") {
+    launch(lastLaunch.fight, lastLaunch.diff);
   }
-  fx = fx.filter(p => p.life > 0);
-  for (const e of embers) {
-    e.y -= e.vy * dt;
-    if (e.y < -10) { e.y = H + 10; e.x = rand(0, W); }
+});
+window.addEventListener("keyup", (e) => { input.keys[e.code] = false; });
+window.addEventListener("blur", () => {
+  for (const k in input.keys) input.keys[k] = false;
+  if (active) active.setPointer(null);
+});
+
+// ======================================================================
+// FIGHT 1: THE WARDEN
+// ======================================================================
+const WARDEN = (() => {
+  const keys = input.keys;
+  const BASE_BOX = { x: 150, y: 130, w: 340, h: 280 };
+  let BOX = { ...BASE_BOX };          // changes size while the arena stretches
+  const SURVIVE = 90;
+  const MAX_HP = 48;
+  const HIT_DMG = 4;
+  const INVULN = 0.6;
+  const SPEED = 230;
+  const DASH_SPEED = 900;
+  const DASH_TIME = 0.15;
+  const DASH_COOLDOWN = 1.0;
+  const EYE_RANGE = 800;
+  const MAX_ATTACKS_PER_TICK = 2;
+  const LONG_EVERY = 6;
+  const STRAIGHT_MAX = 3;
+
+  let DIFF = PRESETS.normal;
+  let selectedDiff = "normal";
+  let state = null, heart = null, pointerTarget = null;
+  let fx = [];
+  let clock = 0;
+  const embers = Array.from({ length: 60 }, () => newEmber(true));
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function dist(ax, ay, bx, by) { return Math.hypot(ax - bx, ay - by); }
+  function intensity() { return Math.min(1, state.time / SURVIVE); }
+  function newEmber(anywhere) {
+    return { x: rand(0, W), y: anywhere ? rand(0, H) : H + 10, vy: rand(10, 35), s: rand(0.8, 2.2), a: rand(0.15, 0.5) };
   }
-}
 
-function drawFx() {
-  for (const p of fx) {
-    const a = Math.max(0, p.life / p.max);
-    if (p.type === "spark") {
-      ctx.globalAlpha = a;
-      ctx.fillStyle = p.color;
-      ctx.beginPath(); ctx.arc(p.x, p.y, p.size * (0.5 + a * 0.5), 0, Math.PI * 2); ctx.fill();
-    } else {
-      const rr = p.r0 + (p.r1 - p.r0) * (1 - a);
-      ctx.globalAlpha = a;
-      ctx.strokeStyle = p.color;
-      ctx.lineWidth = 3 * a + 1;
-      ctx.beginPath(); ctx.arc(p.x, p.y, rr, 0, Math.PI * 2); ctx.stroke();
-    }
+  function reset() {
+    state = {
+      running: false, time: 0, hp: MAX_HP, invuln: 0, shake: 0, flash: 0,
+      cooldown: 1.0, lasers: [], bullets: [], longCount: 0, gid: 0,
+      dashCd: 0, dashT: 0, dashDx: 0, dashDy: -1, dashTrail: [],
+      stretchCd: 12, stretchT: 0, stretchAxis: "h", stretchAmt: 0
+    };
+    BOX = { ...BASE_BOX };
+    heart = { x: BOX.x + BOX.w / 2, y: BOX.y + BOX.h / 2, r: 6 };
+    pointerTarget = null;
+    fx = [];
   }
-  ctx.globalAlpha = 1;
-}
 
-function drawEmbers() {
-  for (const e of embers) {
-    ctx.globalAlpha = e.a * (0.6 + 0.4 * Math.sin(clock * 2 + e.x));
-    ctx.fillStyle = "#ff5566";
-    ctx.fillRect(e.x, e.y, e.s, e.s);
+  function clampHeart() {
+    heart.x = Math.max(BOX.x + heart.r, Math.min(BOX.x + BOX.w - heart.r, heart.x));
+    heart.y = Math.max(BOX.y + heart.r, Math.min(BOX.y + BOX.h - heart.r, heart.y));
   }
-  ctx.globalAlpha = 1;
-}
 
-// ---------- LASER CONSTRUCTORS ----------
-function makeHLaser() {
-  return { kind: "h", y: rand(BOX.y + 12, BOX.y + BOX.h - 12), age: 0,
-    warn: rand(0.5, 0.8) - intensity() * 0.2, fire: rand(0.2, 0.3) };
-}
-
-function makeVLaser() {
-  return { kind: "v", x: rand(BOX.x + 12, BOX.x + BOX.w - 12), age: 0,
-    warn: rand(0.5, 0.8) - intensity() * 0.2, fire: rand(0.2, 0.3) };
-}
-
-// Long laser: big, stays on for 2 seconds. Spawns every 6 seconds survived.
-function spawnLong() {
-  const l = Math.random() < 0.5 ? makeHLaser() : makeVLaser();
-  l.long = true;
-  l.warn = 1.2;
-  l.fire = 2.0;
-  pushLaser(l);
-}
-
-// Spinning beam from outside the box
-function makeEye() {
-  const side = Math.floor(Math.random() * 4);
-  let ox, oy;
-  if (side === 0) { ox = rand(0, W); oy = -30; }
-  else if (side === 1) { ox = W + 30; oy = rand(0, H); }
-  else if (side === 2) { ox = rand(0, W); oy = H + 30; }
-  else { ox = -30; oy = rand(0, H); }
-  const spin = rand(0.6, 1.4) * (Math.random() < 0.5 ? 1 : -1) * (1 + intensity() * 0.5);
-  return { kind: "eye", ox, oy, a: Math.atan2(heart.y - oy, heart.x - ox) + rand(-0.3, 0.3),
-    spin, age: 0, warn: 1.2, fire: rand(1.0, 1.8) };
-}
-
-// Snipe: an aim line locks onto the heart, then a fast bullet fires along it
-function makeSnipe() {
-  const ang = Math.atan2(heart.y - BOX.y - BOX.h / 2, heart.x - BOX.x - BOX.w / 2);
-  return { kind: "snipe", ang, sx: heart.x - Math.cos(ang) * 500, sy: heart.y - Math.sin(ang) * 500,
-    age: 0, warn: 0.9, fire: 0.1, fired: false };
-}
-
-// Area pulse: a circle that closes in, then detonates and hurts anything inside
-function makePulse() {
-  const R = 70;
-  return { kind: "pulse", x: rand(BOX.x + R, BOX.x + BOX.w - R), y: rand(BOX.y + R, BOX.y + BOX.h - R),
-    R, age: 0, warn: 0.4, fire: 0.15 };
-}
-
-// Cone: five telegraphed lines fan out from the edge, then five bullets fire along them
-function makeCone() {
-  const side = Math.floor(Math.random() * 4);
-  let ox, oy;
-  if (side === 0) { ox = rand(BOX.x, BOX.x + BOX.w); oy = BOX.y - 30; }
-  else if (side === 1) { ox = BOX.x + BOX.w + 30; oy = rand(BOX.y, BOX.y + BOX.h); }
-  else if (side === 2) { ox = rand(BOX.x, BOX.x + BOX.w); oy = BOX.y + BOX.h + 30; }
-  else { ox = BOX.x - 30; oy = rand(BOX.y, BOX.y + BOX.h); }
-  const base = Math.atan2(heart.y - oy, heart.x - ox);
-  return { kind: "cone", ox, oy, angles: [-0.3, -0.15, 0, 0.15, 0.3].map(d => base + d),
-    age: 0, warn: 0.6, fire: 0.05, fired: false };
-}
-
-// Beacon: a small charging point that bursts into a ring of bullets
-function makeBeacon() {
-  return { kind: "beacon", x: rand(BOX.x + 40, BOX.x + BOX.w - 40), y: rand(BOX.y + 40, BOX.y + BOX.h - 40),
-    age: 0, warn: 0.6, fire: 0.05, fired: false };
-}
-
-// Crusher: a hazard band sweeps across the arena with a gap you need to reach
-function makeCrusher() {
-  const horiz = Math.random() < 0.5;
-  const fromStart = Math.random() < 0.5;
-  const lo = horiz ? BOX.y - 30 : BOX.x - 30;
-  const hi = horiz ? BOX.y + BOX.h + 30 : BOX.x + BOX.w + 30;
-  return { kind: "crush", horiz, thick: 50, gapFrac: rand(0, 1),
-    from: fromStart ? lo : hi, to: fromStart ? hi : lo, age: 0, warn: 0.8, fire: 1.0 };
-}
-
-function crushParts(l) {
-  const p = Math.min(1, Math.max(0, (l.age - l.warn) / l.fire));
-  const c = l.from + (l.to - l.from) * p;
-  const band = l.horiz
-    ? { x: BOX.x, y: c - l.thick / 2, w: BOX.w, h: l.thick }
-    : { x: c - l.thick / 2, y: BOX.y, w: l.thick, h: BOX.h };
-  const gap = l.horiz
-    ? { x: BOX.x + l.gapFrac * (BOX.w - 90), y: band.y, w: 90, h: band.h }
-    : { x: band.x, y: BOX.y + l.gapFrac * (BOX.h - 90), w: band.w, h: 90 };
-  return { band, gap };
-}
-
-// Spiral: bullets stream outward from the middle of the arena
-function makeSpiral() {
-  const cx = BOX.x + BOX.w / 2, cy = BOX.y + BOX.h / 2;
-  if (dist(cx, cy, heart.x, heart.y) < 60) return null;
-  return { kind: "spiral", x: cx, y: cy, ang: rand(0, Math.PI * 2), acc: 0,
-    age: 0, warn: 0.6, fire: 2.0 };
-}
-
-// Pillars: two full-height columns appear and burn for a moment
-function makePillars() {
-  const f1 = rand(0, 1);
-  let f2 = rand(0, 1);
-  while (Math.abs(f2 - f1) < 0.4) f2 = rand(0, 1);
-  return { kind: "pillar", f: [f1, f2], pw: 50, age: 0, warn: 0.9, fire: 0.8 };
-}
-
-function pillarRects(l) {
-  return l.f.map(f => ({ x: BOX.x + f * (BOX.w - l.pw), y: BOX.y, w: l.pw, h: BOX.h }));
-}
-
-// Meteors: three marked targets; a fireball drops onto each one when the warning ends
-function makeMeteors() {
-  const pts = [];
-  for (let i = 0; i < 3; i++) {
-    pts.push({ x: rand(BOX.x + 20, BOX.x + BOX.w - 20), y: rand(BOX.y + 20, BOX.y + BOX.h - 20) });
+  function inRect(px, py, r, rect) {
+    return px > rect.x - r && px < rect.x + rect.w + r && py > rect.y - r && py < rect.y + rect.h + r;
   }
-  return { kind: "meteor", pts, age: 0, warn: 1.0, fire: 0.05, fired: false };
-}
 
-// ---------- BULLET PATTERNS ----------
-function bulletsRain() {
-  const count = 10 + Math.floor(intensity() * 6);
-  const gaps = 2 + Math.floor(Math.random() * 2);
-  const gapSet = new Set();
-  while (gapSet.size < gaps) gapSet.add(Math.floor(Math.random() * count));
-  const speed = rand(130, 160) + intensity() * 100;
-  const fromTop = Math.random() < 0.5;
-  const out = [];
-  for (let i = 0; i < count; i++) {
-    if (gapSet.has(i)) continue;
-    out.push({ x: BOX.x + 10 + (i / (count - 1)) * (BOX.w - 20), y: fromTop ? BOX.y - 12 : BOX.y + BOX.h + 12,
-      vx: 0, vy: fromTop ? speed : -speed, r: 7, life: 6, color: "#ffd7d7" });
+  function distToSegment(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)));
+    return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
   }
-  return out;
-}
 
-function bulletsAimed() {
-  const edgeX = Math.random() < 0.5 ? BOX.x - 20 : BOX.x + BOX.w + 20;
-  const edgeY = rand(BOX.y, BOX.y + BOX.h);
-  const base = Math.atan2(heart.y - edgeY, heart.x - edgeX);
-  const n = 3 + Math.floor(intensity() * 2);
-  const out = [];
-  for (let i = 0; i < n; i++) {
-    const ang = base + rand(-0.2, 0.2);
-    const sp = rand(160, 210) + intensity() * 80;
-    out.push({ x: edgeX, y: edgeY, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, r: 6, life: 5, color: "#ffae42" });
+  function pushLaser(l) { l.gid = ++state.gid; state.lasers.push(l); return l; }
+  function addGroup(arr) { const g = ++state.gid; for (const b of arr) b.group = g; state.bullets.push(...arr); }
+
+  function eyeActive() { return state.lasers.some(l => l.kind === "eye" && l.age < l.warn + l.fire + 0.1); }
+  function straightActive() {
+    return state.lasers.filter(l => (l.kind === "h" || l.kind === "v") && l.age < l.warn + l.fire + 0.1).length;
   }
-  return out;
-}
-
-function bulletsHoming() {
-  const n = 2 + Math.floor(intensity() * 2);
-  const out = [];
-  for (let i = 0; i < n; i++) {
-    out.push({ x: rand(BOX.x + 20, BOX.x + BOX.w - 20), y: BOX.y - 15,
-      vx: rand(-40, 40), vy: rand(70, 95), r: 8, homing: true, life: 4.5, color: "#ff5cff" });
+  function activeAttacks() {
+    const ids = new Set();
+    for (const l of state.lasers) if (l.age < l.warn + l.fire + 0.1) ids.add(l.gid);
+    for (const b of state.bullets) if (b.group) ids.add(b.group);
+    return ids.size;
   }
-  return out;
-}
-
-function bulletsBouncers() {
-  const out = [];
-  for (let i = 0; i < 3; i++) {
-    const a = rand(0, Math.PI * 2);
-    const sp = rand(120, 160) + intensity() * 60;
-    out.push({ x: rand(BOX.x + 40, BOX.x + BOX.w - 40), y: rand(BOX.y + 40, BOX.y + BOX.h - 40),
-      vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, r: 6, bounces: 4, bounce: true, life: 8, color: "#5cf2ff" });
+  function eyeSegment(l) {
+    const a = l.a + l.spin * (l.age - l.warn);
+    return { x1: l.ox, y1: l.oy, x2: l.ox + Math.cos(a) * EYE_RANGE, y2: l.oy + Math.sin(a) * EYE_RANGE };
   }
-  return out;
-}
 
-// Slider: a row of bullets crosses the arena with a gap in it
-function bulletsSlider() {
-  const y = rand(BOX.y + 20, BOX.y + BOX.h - 20);
-  const fromLeft = Math.random() < 0.5;
-  const gapX = rand(BOX.x + 40, BOX.x + BOX.w - 40);
-  const sp = 150 + intensity() * 80;
-  const out = [];
-  for (let i = 0; i < 16; i++) {
-    const x = (fromLeft ? BOX.x - 20 : BOX.x + BOX.w + 20) + (fromLeft ? -1 : 1) * i * 22;
-    if (Math.abs(x - gapX) < 30) continue;
-    out.push({ x, y, vx: fromLeft ? sp : -sp, vy: 0, r: 6, life: 4, color: "#ff8a65" });
-  }
-  return out;
-}
-
-// Orbit: a ring of diamond shards circles the middle of the arena
-function bulletsOrbit() {
-  const cx = BOX.x + BOX.w / 2, cy = BOX.y + BOX.h / 2, R = 110, n = 8;
-  const off = rand(0, Math.PI * 2);
-  const av = (Math.random() < 0.5 ? 1 : -1) * rand(0.8, 1.2);
-  const out = [];
-  for (let i = 0; i < n; i++) {
-    const a = off + (i / n) * Math.PI * 2;
-    out.push({ x: cx + Math.cos(a) * R, y: cy + Math.sin(a) * R, vx: 0, vy: 0, r: 6,
-      orbit: { cx, cy, R, ang: a, av }, life: 5, color: "#ffe066" });
-  }
-  return out;
-}
-
-// ---------- ATTACK SELECTION ----------
-// Each entry: weight, whether it's allowed right now, and what it does
-function attackList() {
-  const t = state.time;
-  const canStraight = straightActive() < STRAIGHT_MAX;
-  return [
-    { w: 1.2, ok: () => canStraight, run: () => pushLaser(makeHLaser()) },
-    { w: 1.2, ok: () => canStraight, run: () => pushLaser(makeVLaser()) },
-    { w: 1.0, ok: () => t > 8 && !eyeActive(), run: () => pushLaser(makeEye()) },
-    { w: 0.8, ok: () => t > 12, run: () => pushLaser(makeSnipe()) },
-    { w: 0.7, ok: () => t > 20, run: () => pushLaser(makePulse()) },
-    { w: 0.8, ok: () => t > 10, run: () => pushLaser(makeCone()) },
-    { w: 0.7, ok: () => t > 15, run: () => {
-        const b = makeBeacon();
-        if (dist(b.x, b.y, heart.x, heart.y) > 70) pushLaser(b);
-      } },
-    { w: 0.7, ok: () => t > 22, run: () => pushLaser(makeCrusher()) },
-    { w: 0.6, ok: () => t > 25, run: () => { const sp = makeSpiral(); if (sp) pushLaser(sp); } },
-    { w: 0.6, ok: () => t > 30, run: () => addGroup(bulletsOrbit()) },
-    { w: 1.0, ok: () => true, run: () => addGroup(bulletsRain()) },
-    { w: 1.0, ok: () => true, run: () => addGroup(bulletsAimed()) },
-    { w: 0.8, ok: () => true, run: () => addGroup(bulletsHoming()) },
-    { w: 0.7, ok: () => t > 15, run: () => addGroup(bulletsBouncers()) },
-    { w: 0.8, ok: () => t > 25, run: () => addGroup(bulletsSlider()) },
-    { w: 0.7, ok: () => t > 18, run: () => pushLaser(makePillars()) },
-    { w: 0.6, ok: () => t > 24, run: () => pushLaser(makeMeteors()) }
-  ];
-}
-
-function spawnTick() {
-  const count = Math.random() < 0.3 + intensity() * 0.4 ? 2 : 1;
-  for (let i = 0; i < Math.min(count, MAX_ATTACKS_PER_TICK); i++) {
-    if (activeAttacks() >= DIFF.maxAttacks) break;
-    const list = attackList().filter(a => a.ok());
-    const total = list.reduce((sum, a) => sum + a.w, 0);
-    let r = Math.random() * total;
-    for (const a of list) {
-      r -= a.w;
-      if (r <= 0) { a.run(); break; }
-    }
-  }
-}
-
-// Fired once when an attack's damage window opens: visual flourish
-function onFire(l) {
-  if (l.kind === "pulse") {
-    ring(l.x, l.y, l.R * 0.4, l.R * 2.2, "#ff3344", 0.6);
-    burst(l.x, l.y, "#ff5566", 22, 200, 0.5);
-  } else if (l.kind === "h") {
-    burst(BOX.x, l.y, "#ff3344", 8, 140, 0.4);
-    burst(BOX.x + BOX.w, l.y, "#ff3344", 8, 140, 0.4);
-  } else if (l.kind === "v") {
-    burst(l.x, BOX.y, "#ff3344", 8, 140, 0.4);
-    burst(l.x, BOX.y + BOX.h, "#ff3344", 8, 140, 0.4);
-  } else if (l.kind === "snipe") {
-    burst(l.sx, l.sy, "#ffffff", 10, 220, 0.3);
-  } else if (l.kind === "cone") {
-    burst(l.ox, l.oy, "#ff6a3d", 14, 160, 0.4);
-  } else if (l.kind === "beacon") {
-    ring(l.x, l.y, 4, 80, "#ff4f7a", 0.6);
-    burst(l.x, l.y, "#ff4f7a", 18, 180, 0.5);
-  }
-}
-
-function fireBurst(l) {
-  if (l.kind === "meteor") {
-    for (const p of l.pts) {
-      state.bullets.push({ x: p.x, y: p.y - 240, vx: 0, vy: 300, r: 12, life: 2.5,
-        color: "#ffa040", group: l.gid });
-    }
-  } else if (l.kind === "cone") {
-    for (const a of l.angles) {
-      state.bullets.push({ x: l.ox, y: l.oy, vx: Math.cos(a) * 240, vy: Math.sin(a) * 240,
-        r: 6, life: 3, color: "#ff6a3d", group: l.gid });
-    }
-  } else {
-    const n = 10, off = rand(0, Math.PI * 2);
+  // ---------- PARTICLES ----------
+  function burst(x, y, color, n, speed, life) {
     for (let i = 0; i < n; i++) {
-      const a = off + (i / n) * Math.PI * 2;
-      state.bullets.push({ x: l.x, y: l.y, vx: Math.cos(a) * 150, vy: Math.sin(a) * 150,
-        r: 5, life: 4, color: "#ff4f7a", group: l.gid });
+      const a = rand(0, Math.PI * 2), sp = rand(speed * 0.3, speed);
+      fx.push({ type: "spark", x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life, max: life, color, size: rand(1.5, 3.5) });
     }
   }
-}
+  function ring(x, y, r0, r1, color, life) { fx.push({ type: "ring", x, y, r0, r1, color, life, max: life }); }
+  function spark1(x, y, vx, vy, color, life) { fx.push({ type: "spark", x, y, vx, vy, life, max: life, color, size: 1.8 }); }
 
-function sparkAlongLong(l) {
-  if (l.kind === "h") spark1(rand(BOX.x, BOX.x + BOX.w), l.y, rand(-60, 60), rand(-90, 90), "#ffd0d0", 0.3);
-  else spark1(l.x, rand(BOX.y, BOX.y + BOX.h), rand(-90, 90), rand(-60, 60), "#ffd0d0", 0.3);
-}
-
-// ---------- UPDATE ----------
-function update(dt) {
-  const s = state;
-  s.time += dt;
-  s.invuln -= dt;
-  s.shake = Math.max(0, s.shake - dt * 30);
-  s.flash = Math.max(0, s.flash - dt * 3);
-
-  // Movement: keys are tracked by physical key code, so Shift can't leave them stuck
-  let dx = 0, dy = 0;
-  if (keys["ArrowLeft"] || keys["KeyA"]) dx -= 1;
-  if (keys["ArrowRight"] || keys["KeyD"]) dx += 1;
-  if (keys["ArrowUp"] || keys["KeyW"]) dy -= 1;
-  if (keys["ArrowDown"] || keys["KeyS"]) dy += 1;
-  if (dx || dy) {
-    const m = Math.hypot(dx, dy);
-    s.dashDx = dx / m;
-    s.dashDy = dy / m;
-    if (s.dashT <= 0) {
-      heart.x += (dx / m) * SPEED * dt;
-      heart.y += (dy / m) * SPEED * dt;
+  function updateFx(dt) {
+    for (const p of fx) {
+      p.life -= dt;
+      if (p.type === "spark") { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.92; p.vy *= 0.92; }
+    }
+    fx = fx.filter(p => p.life > 0);
+    for (const e of embers) {
+      e.y -= e.vy * dt;
+      if (e.y < -10) { e.y = H + 10; e.x = rand(0, W); }
     }
   }
 
-  // Dash: fast movement with no damage taken until it ends
-  s.dashCd -= dt;
-  if (s.dashT > 0) {
-    s.dashT -= dt;
-    heart.x += s.dashDx * DASH_SPEED * dt;
-    heart.y += s.dashDy * DASH_SPEED * dt;
-    s.dashTrail.push({ x: heart.x, y: heart.y, life: 0.25 });
-  }
-  if (pointerTarget && s.dashT <= 0) {
-    const ease = Math.min(1, dt * 18);
-    heart.x += (pointerTarget.x - heart.x) * ease;
-    heart.y += (pointerTarget.y - heart.y) * ease;
-  }
-  clampHeart();
-  s.dashTrail = s.dashTrail.filter(p => (p.life -= dt) > 0);
-
-  s.cooldown -= dt;
-  if (s.cooldown <= 0) {
-    spawnTick();
-    s.cooldown = Math.max(0.35, rand(0.6, 1.2) - intensity() * 0.6) * DIFF.spawn;
-  }
-
-  // Long laser every 6 seconds survived (waits if the attack cap is full)
-  const longDue = Math.floor(s.time / LONG_EVERY);
-  while (s.longCount < longDue && activeAttacks() < DIFF.maxAttacks) {
-    s.longCount++;
-    spawnLong();
-  }
-
-  // Arena stretch: runs on its own timer and never counts toward the attack cap
-  const STRETCH_TIME = 6.5;
-  if (s.stretchT > 0) {
-    s.stretchT -= dt;
-  } else {
-    s.stretchCd -= dt;
-    if (s.stretchCd <= 0 && s.time > 10) {
-      s.stretchT = STRETCH_TIME;
-      s.stretchAxis = Math.random() < 0.5 ? "h" : "v";
-      s.stretchCd = rand(12, 16);
-      ring(BOX.x + BOX.w / 2, BOX.y + BOX.h / 2, 30, 420, "#7fd7ff", 0.9);
-    }
-  }
-  let grow = 0;
-  if (s.stretchT > 0) {
-    const elapsed = STRETCH_TIME - s.stretchT;
-    grow = Math.min(1, elapsed / 0.8, s.stretchT / 0.8);   // ease in, hold, ease out
-  }
-  s.stretchAmt = grow * (s.stretchAxis === "h" ? 120 : 40);
-  BOX = s.stretchAxis === "h"
-    ? { x: BASE_BOX.x - s.stretchAmt / 2, y: BASE_BOX.y, w: BASE_BOX.w + s.stretchAmt, h: BASE_BOX.h }
-    : { x: BASE_BOX.x, y: BASE_BOX.y - s.stretchAmt / 2, w: BASE_BOX.w, h: BASE_BOX.h + s.stretchAmt };
-  clampHeart();
-
-  // Telegraphed attacks
-  for (const l of s.lasers) {
-    if (!l.scaled) { l.scaled = true; l.warn *= DIFF.warn; }
-    l.age += dt;
-
-    if (l.kind === "spiral") {
-      if (l.age > l.warn && l.age < l.warn + l.fire) {
-        l.acc += dt;
-        while (l.acc >= 0.12) {
-          l.acc -= 0.12;
-          s.bullets.push({ x: l.x, y: l.y, vx: Math.cos(l.ang) * 130, vy: Math.sin(l.ang) * 130,
-            r: 5, life: 5, color: "#ffa050", group: l.gid });
-          l.ang += 0.55;
-        }
-      }
-      continue;
-    }
-
-    if (l.kind === "cone" || l.kind === "beacon" || l.kind === "meteor") {
-      if (!l.fired && l.age >= l.warn) { l.fired = true; fireBurst(l); onFire(l); }
-      continue;
-    }
-
-    if (l.kind === "crush") {
-      if (l.age > l.warn && l.age < l.warn + l.fire) {
-        const { band, gap } = crushParts(l);
-        if (inRect(heart.x, heart.y, heart.r, band) && !inRect(heart.x, heart.y, heart.r, gap)) damage();
-      }
-      continue;
-    }
-
-    const firing = l.age > l.warn && l.age < l.warn + l.fire;
-    if (!firing) continue;
-    if (!l.boom) { l.boom = true; onFire(l); }
-
-    let hit = false;
-    if (l.kind === "h") hit = Math.abs(heart.y - l.y) < heart.r + (l.long ? 16 : 6);
-    else if (l.kind === "v") hit = Math.abs(heart.x - l.x) < heart.r + (l.long ? 16 : 6);
-    else if (l.kind === "eye") {
-      const g = eyeSegment(l);
-      hit = distToSegment(heart.x, heart.y, g.x1, g.y1, g.x2, g.y2) < heart.r + 5;
-    } else if (l.kind === "pulse") {
-      hit = dist(heart.x, heart.y, l.x, l.y) < l.R + heart.r;
-    } else if (l.kind === "pillar") {
-      hit = pillarRects(l).some(r => inRect(heart.x, heart.y, heart.r, r));
-    } else if (l.kind === "snipe" && !l.fired) {
-      l.fired = true;
-      s.bullets.push({ x: l.sx, y: l.sy, vx: Math.cos(l.ang) * 620, vy: Math.sin(l.ang) * 620,
-        r: 5, life: 1.5, color: "#ffffff" });
-    }
-
-    if (l.long && Math.random() < 0.5) sparkAlongLong(l);
-    if (hit) damage();
-  }
-  s.lasers = s.lasers.filter(l => l.age < l.warn + l.fire + 0.1);
-
-  // Bullets
-  for (const b of s.bullets) {
-    if (b.orbit) {
-      b.orbit.ang += b.orbit.av * dt;
-      b.x = b.orbit.cx + Math.cos(b.orbit.ang) * b.orbit.R;
-      b.y = b.orbit.cy + Math.sin(b.orbit.ang) * b.orbit.R;
-    }
-    if (b.homing) {
-      const ang = Math.atan2(heart.y - b.y, heart.x - b.x);
-      const sp = Math.hypot(b.vx, b.vy);
-      const cur = Math.atan2(b.vy, b.vx);
-      let diff = ang - cur;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      const turn = Math.max(-1.0 * dt, Math.min(1.0 * dt, diff));
-      const newAng = cur + turn;
-      b.vx = Math.cos(newAng) * sp;
-      b.vy = Math.sin(newAng) * sp;
-    }
-    b.x += b.vx * dt * DIFF.speed;
-    b.y += b.vy * dt * DIFF.speed;
-    b.life -= dt;
-
-    b.trail = b.trail || [];
-    b.trail.push({ x: b.x, y: b.y });
-    if (b.trail.length > 5) b.trail.shift();
-
-    if (b.bounce) {
-      if (b.x < BOX.x + b.r || b.x > BOX.x + BOX.w - b.r) {
-        b.vx = -b.vx; b.bounces--;
-        b.x = Math.max(BOX.x + b.r, Math.min(BOX.x + BOX.w - b.r, b.x));
-        burst(b.x, b.y, b.color, 3, 60, 0.2);
-      }
-      if (b.y < BOX.y + b.r || b.y > BOX.y + BOX.h - b.r) {
-        b.vy = -b.vy; b.bounces--;
-        b.y = Math.max(BOX.y + b.r, Math.min(BOX.y + BOX.h - b.r, b.y));
-        burst(b.x, b.y, b.color, 3, 60, 0.2);
-      }
-      if (b.bounces < 0) b.dead = true;
-    }
-    if (dist(b.x, b.y, heart.x, heart.y) < b.r + heart.r - 2) {
-      b.dead = true;
-      damage();
-    }
-  }
-  s.bullets = s.bullets.filter(b => !b.dead && b.life > 0 &&
-    b.x > -60 && b.x < W + 60 && b.y > -60 && b.y < H + 60);
-
-  if (s.time >= SURVIVE) {
-    s.running = false;
-    showOverlay("YOU SURVIVED", "The Warden falls silent. You should not have made it this far.");
-  }
-}
-
-function tryDash() {
-  if (!state || !state.running || state.dashCd > 0) return;
-  state.dashT = DASH_TIME;
-  state.dashCd = DASH_COOLDOWN;
-  burst(heart.x, heart.y, "#7fe8ff", 10, 120, 0.35);
-}
-
-function damage() {
-  if (state.invuln > 0 || state.dashT > 0) return;
-  state.hp -= HIT_DMG;
-  state.invuln = INVULN;
-  state.shake = 14;
-  state.flash = 1;
-  burst(heart.x, heart.y, "#ff1a2e", 26, 220, 0.6);
-  if (state.hp <= 0) {
-    state.hp = 0;
-    state.running = false;
-    showOverlay("YOU DIED", "Survived " + Math.floor(state.time) + " of " + SURVIVE + " seconds.");
-  }
-}
-
-// ---------- DRAWING HELPERS ----------
-function seg(x1, y1, x2, y2) {
-  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-}
-
-// Glowing beam: soft outer glow, bright body, white core
-function drawBeam(x1, y1, x2, y2, w, color, alpha) {
-  ctx.save();
-  ctx.lineCap = "round";
-  ctx.strokeStyle = color;
-  ctx.globalAlpha = alpha * 0.22; ctx.lineWidth = w * 3.2; seg(x1, y1, x2, y2);
-  ctx.globalAlpha = alpha * 0.55; ctx.lineWidth = w * 1.6; seg(x1, y1, x2, y2);
-  ctx.globalAlpha = alpha; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = Math.max(2, w * 0.35);
-  seg(x1, y1, x2, y2);
-  ctx.restore();
-}
-
-// Dashed, marching warning line
-function drawWarnLine(x1, y1, x2, y2, color, alpha, width) {
-  ctx.save();
-  ctx.strokeStyle = color;
-  ctx.globalAlpha = alpha;
-  ctx.lineWidth = width;
-  ctx.setLineDash([12, 10]);
-  ctx.lineDashOffset = -clock * 90;
-  seg(x1, y1, x2, y2);
-  ctx.restore();
-}
-
-// Diagonal hazard stripes, animated
-function hazardRect(x, y, w, h, color) {
-  if (w <= 0 || h <= 0) return;
-  ctx.save();
-  ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
-  ctx.fillStyle = color;
-  ctx.fillRect(x, y, w, h);
-  ctx.fillStyle = "rgba(0,0,0,0.5)";
-  const off = (clock * 40) % 18;
-  for (let i = -h + off; i < w + h; i += 18) {
-    ctx.beginPath();
-    ctx.moveTo(x + i, y + h); ctx.lineTo(x + i + h, y);
-    ctx.lineTo(x + i + h + 9, y); ctx.lineTo(x + i + 9, y + h);
-    ctx.closePath(); ctx.fill();
-  }
-  ctx.restore();
-}
-
-function heartShape(x, y, s) {
-  ctx.beginPath();
-  ctx.moveTo(x, y + s * 0.35);
-  ctx.bezierCurveTo(x, y - s * 0.2, x - s, y - s * 0.2, x - s, y + s * 0.1);
-  ctx.bezierCurveTo(x - s, y + s * 0.6, x, y + s * 0.8, x, y + s);
-  ctx.bezierCurveTo(x, y + s * 0.8, x + s, y + s * 0.6, x + s, y + s * 0.1);
-  ctx.bezierCurveTo(x + s, y - s * 0.2, x, y - s * 0.2, x, y + s * 0.35);
-  ctx.closePath();
-}
-
-function diamond(s) {
-  ctx.beginPath();
-  ctx.moveTo(0, -s); ctx.lineTo(s * 0.7, 0); ctx.lineTo(0, s); ctx.lineTo(-s * 0.7, 0);
-  ctx.closePath();
-}
-
-function drawLaser(l, warning, pulse) {
-  if (l.kind === "h" || l.kind === "v") {
-    let x1, y1, x2, y2;
-    if (l.kind === "h") { x1 = BOX.x; y1 = l.y; x2 = BOX.x + BOX.w; y2 = l.y; }
-    else { x1 = l.x; y1 = BOX.y; x2 = l.x; y2 = BOX.y + BOX.h; }
-    if (warning) drawWarnLine(x1, y1, x2, y2, "#ff3344", 0.35 + 0.35 * pulse, l.long ? 4 : 2);
-    else if (l.long) drawBeam(x1, y1, x2, y2, 14, "#ff2a3d", 1);
-    else drawBeam(x1, y1, x2, y2, 6, "#ff3344", 1);
-    return;
-  }
-
-  if (l.kind === "eye") {
-    if (warning) {
-      const endA = l.a + l.spin * l.fire;
-      const g = ctx.createRadialGradient(l.ox, l.oy, 0, l.ox, l.oy, EYE_RANGE);
-      g.addColorStop(0, "rgba(255,50,70,0.04)");
-      g.addColorStop(1, "rgba(255,50,70,0.3)");
-      ctx.fillStyle = g;
-      ctx.beginPath(); ctx.moveTo(l.ox, l.oy);
-      ctx.arc(l.ox, l.oy, EYE_RANGE, l.a, endA, l.spin < 0);
-      ctx.closePath(); ctx.fill();
-      drawWarnLine(l.ox, l.oy, l.ox + Math.cos(l.a) * EYE_RANGE, l.oy + Math.sin(l.a) * EYE_RANGE,
-        "#ff3344", 0.5 + 0.3 * pulse, 2);
-      drawWarnLine(l.ox, l.oy, l.ox + Math.cos(endA) * EYE_RANGE, l.oy + Math.sin(endA) * EYE_RANGE,
-        "#ff3344", 0.5 + 0.3 * pulse, 2);
-    } else {
-      const g = eyeSegment(l);
-      drawBeam(g.x1, g.y1, g.x2, g.y2, 8, "#ff3344", 1);
-    }
-    return;
-  }
-
-  if (l.kind === "pulse") {
-    if (warning) {
-      const p = l.age / l.warn;
-      ctx.fillStyle = "rgba(255,50,70," + (0.08 + 0.12 * p) + ")";
-      ctx.beginPath(); ctx.arc(l.x, l.y, l.R, 0, Math.PI * 2); ctx.fill();
-      ctx.save();
-      ctx.setLineDash([8, 8]);
-      ctx.lineDashOffset = -clock * 60;
-      ctx.strokeStyle = "rgba(255,80,90,0.9)";
-      ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(l.x, l.y, l.R * (1.6 - 0.6 * p), 0, Math.PI * 2); ctx.stroke();
-      ctx.restore();
-    } else {
-      const g = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, l.R);
-      g.addColorStop(0, "rgba(255,255,255,0.9)");
-      g.addColorStop(0.4, "rgba(255,60,80,0.9)");
-      g.addColorStop(1, "rgba(255,30,60,0.2)");
-      ctx.fillStyle = g;
-      ctx.beginPath(); ctx.arc(l.x, l.y, l.R, 0, Math.PI * 2); ctx.fill();
-    }
-    return;
-  }
-
-  if (l.kind === "snipe") {
-    const ex = l.sx + Math.cos(l.ang) * 900, ey = l.sy + Math.sin(l.ang) * 900;
-    if (warning) {
-      drawWarnLine(l.sx, l.sy, ex, ey, "#ff3344", 0.35 + 0.35 * pulse, 2);
-      const tx = l.sx + Math.cos(l.ang) * 500, ty = l.sy + Math.sin(l.ang) * 500;
-      const p = l.age / l.warn;
-      ctx.save();
-      ctx.strokeStyle = "rgba(255,80,90," + (0.5 + 0.5 * pulse) + ")";
-      ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(tx, ty, 6 + 14 * (1 - p), 0, Math.PI * 2); ctx.stroke();
-      ctx.restore();
-    } else {
-      drawBeam(l.sx, l.sy, ex, ey, 3, "#ffffff", 1);
-    }
-    return;
-  }
-
-  if (l.kind === "pillar") {
-    for (const r of pillarRects(l)) {
-      if (warning) {
-        ctx.save();
-        ctx.setLineDash([10, 8]);
-        ctx.lineDashOffset = -clock * 70;
-        ctx.strokeStyle = "rgba(255,80,90," + (0.4 + 0.4 * pulse) + ")";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(r.x, r.y, r.w, r.h);
-        ctx.fillStyle = "rgba(255,50,70,0.08)";
-        ctx.fillRect(r.x, r.y, r.w, r.h);
-        ctx.restore();
+  function drawFx() {
+    for (const p of fx) {
+      const a = Math.max(0, p.life / p.max);
+      if (p.type === "spark") {
+        ctx.globalAlpha = a;
+        ctx.fillStyle = p.color;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.size * (0.5 + a * 0.5), 0, Math.PI * 2); ctx.fill();
       } else {
-        const g = ctx.createLinearGradient(r.x, 0, r.x + r.w, 0);
-        g.addColorStop(0, "rgba(255,40,60,0.5)");
-        g.addColorStop(0.5, "rgba(255,200,200,0.95)");
-        g.addColorStop(1, "rgba(255,40,60,0.5)");
-        ctx.fillStyle = g;
-        ctx.fillRect(r.x, r.y, r.w, r.h);
-      }
-    }
-    return;
-  }
-
-  if (l.kind === "meteor") {
-    for (const p of l.pts) {
-      const k = l.age / l.warn;
-      ctx.save();
-      ctx.strokeStyle = "rgba(255,160,64," + (0.4 + 0.4 * pulse) + ")";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6, 8]);
-      ctx.lineDashOffset = -clock * 60;
-      ctx.beginPath(); ctx.moveTo(p.x, BOX.y); ctx.lineTo(p.x, BOX.y + BOX.h); ctx.stroke();
-      ctx.restore();
-      if (warning) {
-        ctx.strokeStyle = "rgba(255,160,64,0.9)";
-        ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(p.x, p.y, 24 - 14 * k, 0, Math.PI * 2); ctx.stroke();
-        ctx.fillStyle = "rgba(255,120,40,0.2)";
-        ctx.beginPath(); ctx.arc(p.x, p.y, 16, 0, Math.PI * 2); ctx.fill();
-      }
-    }
-    return;
-  }
-
-  if (l.kind === "cone") {
-    if (warning) {
-      ctx.fillStyle = "rgba(255,106,61," + (0.08 + 0.06 * pulse) + ")";
-      ctx.beginPath(); ctx.moveTo(l.ox, l.oy);
-      ctx.arc(l.ox, l.oy, 900, l.angles[0], l.angles[l.angles.length - 1]);
-      ctx.closePath(); ctx.fill();
-      for (const a of l.angles) {
-        drawWarnLine(l.ox, l.oy, l.ox + Math.cos(a) * 900, l.oy + Math.sin(a) * 900,
-          "#ff6a3d", 0.5 + 0.3 * pulse, 2);
-      }
-    }
-    return;
-  }
-
-  if (l.kind === "beacon") {
-    if (warning) {
-      const p = l.age / l.warn;
-      ctx.fillStyle = "rgba(255,79,122," + (0.15 + 0.35 * p) + ")";
-      ctx.beginPath(); ctx.arc(l.x, l.y, 4 + 14 * p, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = "rgba(255,79,122,0.85)";
-      ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(l.x, l.y, 30 - 20 * p, 0, Math.PI * 2); ctx.stroke();
-    }
-    return;
-  }
-
-  if (l.kind === "crush") {
-    const { band, gap } = crushParts(l);
-    ctx.save();
-    ctx.globalAlpha = warning ? 0.5 : 1;
-    const col = warning ? "#ff8a2a" : "#ff3344";
-    if (l.horiz) {
-      hazardRect(band.x, band.y, gap.x - band.x, band.h, col);
-      hazardRect(gap.x + gap.w, band.y, band.x + band.w - (gap.x + gap.w), band.h, col);
-    } else {
-      hazardRect(band.x, band.y, band.w, gap.y - band.y, col);
-      hazardRect(band.x, gap.y + gap.h, band.w, band.y + band.h - (gap.y + gap.h), col);
-    }
-    ctx.fillStyle = "rgba(120,255,220,0.18)";
-    ctx.fillRect(gap.x, gap.y, gap.w, gap.h);
-    ctx.restore();
-    return;
-  }
-
-  if (l.kind === "spiral") {
-    if (warning) {
-      // Particles converge on the centre while it charges
-      const p = l.age / l.warn;
-      for (let k = 0; k < 8; k++) {
-        const a = k * Math.PI / 4 + clock * 2;
-        const rr = 120 * (1 - p) + 4;
-        ctx.fillStyle = "rgba(255,150,80,0.9)";
-        ctx.beginPath(); ctx.arc(l.x + Math.cos(a) * rr, l.y + Math.sin(a) * rr, 3, 0, Math.PI * 2); ctx.fill();
-      }
-    } else {
-      const g = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, 26);
-      g.addColorStop(0, "rgba(255,220,160,0.9)");
-      g.addColorStop(1, "rgba(255,120,40,0)");
-      ctx.fillStyle = g;
-      ctx.beginPath(); ctx.arc(l.x, l.y, 26, 0, Math.PI * 2); ctx.fill();
-    }
-  }
-}
-
-function drawBullets() {
-  const seenOrbit = new Set();
-  for (const b of state.bullets) {
-    if (b.orbit && !seenOrbit.has(b.group)) {
-      seenOrbit.add(b.group);
-      ctx.save();
-      ctx.strokeStyle = "rgba(255,224,102,0.12)";
-      ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(b.orbit.cx, b.orbit.cy, b.orbit.R, 0, Math.PI * 2); ctx.stroke();
-      ctx.restore();
-    }
-    const c = b.color || "#ffffff";
-    if (b.trail) {
-      for (let i = 0; i < b.trail.length; i++) {
-        const tp = b.trail[i], f = (i + 1) / b.trail.length;
-        ctx.globalAlpha = f * 0.3;
-        ctx.fillStyle = c;
-        ctx.beginPath(); ctx.arc(tp.x, tp.y, b.r * (0.4 + 0.6 * f), 0, Math.PI * 2); ctx.fill();
+        const rr = p.r0 + (p.r1 - p.r0) * (1 - a);
+        ctx.globalAlpha = a;
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = 3 * a + 1;
+        ctx.beginPath(); ctx.arc(p.x, p.y, rr, 0, Math.PI * 2); ctx.stroke();
       }
     }
     ctx.globalAlpha = 1;
-    if (b.orbit) {
-      ctx.save();
-      ctx.translate(b.x, b.y);
-      ctx.rotate(clock * 6);
-      ctx.fillStyle = c; diamond(b.r * 1.5); ctx.fill();
-      ctx.fillStyle = "#ffffff"; diamond(b.r * 0.6); ctx.fill();
-      ctx.restore();
+  }
+
+  function drawEmbers() {
+    for (const e of embers) {
+      ctx.globalAlpha = e.a * (0.6 + 0.4 * Math.sin(clock * 2 + e.x));
+      ctx.fillStyle = "#ff5566";
+      ctx.fillRect(e.x, e.y, e.s, e.s);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // ---------- LASERS ----------
+  function makeHLaser() {
+    return { kind: "h", y: rand(BOX.y + 12, BOX.y + BOX.h - 12), age: 0, warn: rand(0.5, 0.8) - intensity() * 0.2, fire: rand(0.2, 0.3) };
+  }
+  function makeVLaser() {
+    return { kind: "v", x: rand(BOX.x + 12, BOX.x + BOX.w - 12), age: 0, warn: rand(0.5, 0.8) - intensity() * 0.2, fire: rand(0.2, 0.3) };
+  }
+  function spawnLong() {
+    const l = Math.random() < 0.5 ? makeHLaser() : makeVLaser();
+    l.long = true; l.warn = 1.2; l.fire = 2.0;
+    pushLaser(l);
+  }
+  function makeEye() {
+    const side = Math.floor(Math.random() * 4);
+    let ox, oy;
+    if (side === 0) { ox = rand(0, W); oy = -30; }
+    else if (side === 1) { ox = W + 30; oy = rand(0, H); }
+    else if (side === 2) { ox = rand(0, W); oy = H + 30; }
+    else { ox = -30; oy = rand(0, H); }
+    const spin = rand(0.6, 1.4) * (Math.random() < 0.5 ? 1 : -1) * (1 + intensity() * 0.5);
+    return { kind: "eye", ox, oy, a: Math.atan2(heart.y - oy, heart.x - ox) + rand(-0.3, 0.3),
+      spin, age: 0, warn: 1.2, fire: rand(1.0, 1.8) };
+  }
+  function makeSnipe() {
+    const ang = Math.atan2(heart.y - BOX.y - BOX.h / 2, heart.x - BOX.x - BOX.w / 2);
+    return { kind: "snipe", ang, sx: heart.x - Math.cos(ang) * 500, sy: heart.y - Math.sin(ang) * 500,
+      age: 0, warn: 0.9, fire: 0.1, fired: false };
+  }
+  function makePulse() {
+    const R = 70;
+    return { kind: "pulse", x: rand(BOX.x + R, BOX.x + BOX.w - R), y: rand(BOX.y + R, BOX.y + BOX.h - R),
+      R, age: 0, warn: 0.4, fire: 0.15 };
+  }
+  function makeCone() {
+    const side = Math.floor(Math.random() * 4);
+    let ox, oy;
+    if (side === 0) { ox = rand(BOX.x, BOX.x + BOX.w); oy = BOX.y - 30; }
+    else if (side === 1) { ox = BOX.x + BOX.w + 30; oy = rand(BOX.y, BOX.y + BOX.h); }
+    else if (side === 2) { ox = rand(BOX.x, BOX.x + BOX.w); oy = BOX.y + BOX.h + 30; }
+    else { ox = BOX.x - 30; oy = rand(BOX.y, BOX.y + BOX.h); }
+    const base = Math.atan2(heart.y - oy, heart.x - ox);
+    return { kind: "cone", ox, oy, angles: [-0.3, -0.15, 0, 0.15, 0.3].map(d => base + d),
+      age: 0, warn: 0.6, fire: 0.05, fired: false };
+  }
+  function makeBeacon() {
+    return { kind: "beacon", x: rand(BOX.x + 40, BOX.x + BOX.w - 40), y: rand(BOX.y + 40, BOX.y + BOX.h - 40),
+      age: 0, warn: 0.6, fire: 0.05, fired: false };
+  }
+  function makeCrusher() {
+    const horiz = Math.random() < 0.5;
+    const fromStart = Math.random() < 0.5;
+    const lo = horiz ? BOX.y - 30 : BOX.x - 30;
+    const hi = horiz ? BOX.y + BOX.h + 30 : BOX.x + BOX.w + 30;
+    return { kind: "crush", horiz, thick: 50, gapFrac: rand(0, 1),
+      from: fromStart ? lo : hi, to: fromStart ? hi : lo, age: 0, warn: 0.8, fire: 1.0 };
+  }
+  function crushParts(l) {
+    const p = Math.min(1, Math.max(0, (l.age - l.warn) / l.fire));
+    const c = l.from + (l.to - l.from) * p;
+    const band = l.horiz
+      ? { x: BOX.x, y: c - l.thick / 2, w: BOX.w, h: l.thick }
+      : { x: c - l.thick / 2, y: BOX.y, w: l.thick, h: BOX.h };
+    const gap = l.horiz
+      ? { x: BOX.x + l.gapFrac * (BOX.w - 90), y: band.y, w: 90, h: band.h }
+      : { x: band.x, y: BOX.y + l.gapFrac * (BOX.h - 90), w: band.w, h: 90 };
+    return { band, gap };
+  }
+  function makeSpiral() {
+    const cx = BOX.x + BOX.w / 2, cy = BOX.y + BOX.h / 2;
+    if (dist(cx, cy, heart.x, heart.y) < 60) return null;
+    return { kind: "spiral", x: cx, y: cy, ang: rand(0, Math.PI * 2), acc: 0, age: 0, warn: 0.6, fire: 2.0 };
+  }
+  function makePillars() {
+    const f1 = rand(0, 1);
+    let f2 = rand(0, 1);
+    while (Math.abs(f2 - f1) < 0.4) f2 = rand(0, 1);
+    return { kind: "pillar", f: [f1, f2], pw: 50, age: 0, warn: 0.9, fire: 0.8 };
+  }
+  function pillarRects(l) {
+    return l.f.map(f => ({ x: BOX.x + f * (BOX.w - l.pw), y: BOX.y, w: l.pw, h: BOX.h }));
+  }
+  function makeMeteors() {
+    const pts = [];
+    for (let i = 0; i < 3; i++) {
+      pts.push({ x: rand(BOX.x + 20, BOX.x + BOX.w - 20), y: rand(BOX.y + 20, BOX.y + BOX.h - 20) });
+    }
+    return { kind: "meteor", pts, age: 0, warn: 1.0, fire: 0.05, fired: false };
+  }
+
+  // ---------- BULLET PATTERNS ----------
+  function bulletsRain() {
+    const count = 10 + Math.floor(intensity() * 6);
+    const gaps = 2 + Math.floor(Math.random() * 2);
+    const gapSet = new Set();
+    while (gapSet.size < gaps) gapSet.add(Math.floor(Math.random() * count));
+    const speed = rand(130, 160) + intensity() * 100;
+    const fromTop = Math.random() < 0.5;
+    const out = [];
+    for (let i = 0; i < count; i++) {
+      if (gapSet.has(i)) continue;
+      out.push({ x: BOX.x + 10 + (i / (count - 1)) * (BOX.w - 20), y: fromTop ? BOX.y - 12 : BOX.y + BOX.h + 12,
+        vx: 0, vy: fromTop ? speed : -speed, r: 7, life: 6, color: "#ffd7d7" });
+    }
+    return out;
+  }
+  function bulletsAimed() {
+    const edgeX = Math.random() < 0.5 ? BOX.x - 20 : BOX.x + BOX.w + 20;
+    const edgeY = rand(BOX.y, BOX.y + BOX.h);
+    const base = Math.atan2(heart.y - edgeY, heart.x - edgeX);
+    const n = 3 + Math.floor(intensity() * 2);
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const ang = base + rand(-0.2, 0.2);
+      const sp = rand(160, 210) + intensity() * 80;
+      out.push({ x: edgeX, y: edgeY, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, r: 6, life: 5, color: "#ffae42" });
+    }
+    return out;
+  }
+  function bulletsHoming() {
+    const n = 2 + Math.floor(intensity() * 2);
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      out.push({ x: rand(BOX.x + 20, BOX.x + BOX.w - 20), y: BOX.y - 15,
+        vx: rand(-40, 40), vy: rand(70, 95), r: 8, homing: true, life: 4.5, color: "#ff5cff" });
+    }
+    return out;
+  }
+  function bulletsBouncers() {
+    const out = [];
+    for (let i = 0; i < 3; i++) {
+      const a = rand(0, Math.PI * 2);
+      const sp = rand(120, 160) + intensity() * 60;
+      out.push({ x: rand(BOX.x + 40, BOX.x + BOX.w - 40), y: rand(BOX.y + 40, BOX.y + BOX.h - 40),
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, r: 6, bounces: 4, bounce: true, life: 8, color: "#5cf2ff" });
+    }
+    return out;
+  }
+  function bulletsSlider() {
+    const y = rand(BOX.y + 20, BOX.y + BOX.h - 20);
+    const fromLeft = Math.random() < 0.5;
+    const gapX = rand(BOX.x + 40, BOX.x + BOX.w - 40);
+    const sp = 150 + intensity() * 80;
+    const out = [];
+    for (let i = 0; i < 16; i++) {
+      const x = (fromLeft ? BOX.x - 20 : BOX.x + BOX.w + 20) + (fromLeft ? -1 : 1) * i * 22;
+      if (Math.abs(x - gapX) < 30) continue;
+      out.push({ x, y, vx: fromLeft ? sp : -sp, vy: 0, r: 6, life: 4, color: "#ff8a65" });
+    }
+    return out;
+  }
+  function bulletsOrbit() {
+    const cx = BOX.x + BOX.w / 2, cy = BOX.y + BOX.h / 2, R = 110, n = 8;
+    const off = rand(0, Math.PI * 2);
+    const av = (Math.random() < 0.5 ? 1 : -1) * rand(0.8, 1.2);
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const a = off + (i / n) * Math.PI * 2;
+      out.push({ x: cx + Math.cos(a) * R, y: cy + Math.sin(a) * R, vx: 0, vy: 0, r: 6,
+        orbit: { cx, cy, R, ang: a, av }, life: 5, color: "#ffe066" });
+    }
+    return out;
+  }
+
+  // ---------- ATTACK SELECTION ----------
+  function attackList() {
+    const t = state.time;
+    const canStraight = straightActive() < STRAIGHT_MAX;
+    return [
+      { w: 1.2, ok: () => canStraight, run: () => pushLaser(makeHLaser()) },
+      { w: 1.2, ok: () => canStraight, run: () => pushLaser(makeVLaser()) },
+      { w: 1.0, ok: () => t > 8 && !eyeActive(), run: () => pushLaser(makeEye()) },
+      { w: 0.8, ok: () => t > 12, run: () => pushLaser(makeSnipe()) },
+      { w: 0.7, ok: () => t > 20, run: () => pushLaser(makePulse()) },
+      { w: 0.8, ok: () => t > 10, run: () => pushLaser(makeCone()) },
+      { w: 0.7, ok: () => t > 15, run: () => {
+          const b = makeBeacon();
+          if (dist(b.x, b.y, heart.x, heart.y) > 70) pushLaser(b);
+        } },
+      { w: 0.7, ok: () => t > 22, run: () => pushLaser(makeCrusher()) },
+      { w: 0.6, ok: () => t > 25, run: () => { const sp = makeSpiral(); if (sp) pushLaser(sp); } },
+      { w: 0.6, ok: () => t > 30, run: () => addGroup(bulletsOrbit()) },
+      { w: 1.0, ok: () => true, run: () => addGroup(bulletsRain()) },
+      { w: 1.0, ok: () => true, run: () => addGroup(bulletsAimed()) },
+      { w: 0.8, ok: () => true, run: () => addGroup(bulletsHoming()) },
+      { w: 0.7, ok: () => t > 15, run: () => addGroup(bulletsBouncers()) },
+      { w: 0.8, ok: () => t > 25, run: () => addGroup(bulletsSlider()) },
+      { w: 0.7, ok: () => t > 18, run: () => pushLaser(makePillars()) },
+      { w: 0.6, ok: () => t > 24, run: () => pushLaser(makeMeteors()) }
+    ];
+  }
+
+  function spawnTick() {
+    const count = Math.random() < 0.3 + intensity() * 0.4 ? 2 : 1;
+    for (let i = 0; i < Math.min(count, MAX_ATTACKS_PER_TICK); i++) {
+      if (activeAttacks() >= DIFF.maxAttacks) break;
+      const list = attackList().filter(a => a.ok());
+      const total = list.reduce((sum, a) => sum + a.w, 0);
+      let r = Math.random() * total;
+      for (const a of list) {
+        r -= a.w;
+        if (r <= 0) { a.run(); break; }
+      }
+    }
+  }
+
+  // Fired once when a telegraph ends
+  function onFire(l) {
+    if (l.kind === "pulse") {
+      ring(l.x, l.y, l.R * 0.4, l.R * 2.2, "#ff3344", 0.6);
+      burst(l.x, l.y, "#ff5566", 22, 200, 0.5);
+    } else if (l.kind === "h") {
+      burst(BOX.x, l.y, "#ff3344", 8, 140, 0.4);
+      burst(BOX.x + BOX.w, l.y, "#ff3344", 8, 140, 0.4);
+    } else if (l.kind === "v") {
+      burst(l.x, BOX.y, "#ff3344", 8, 140, 0.4);
+      burst(l.x, BOX.y + BOX.h, "#ff3344", 8, 140, 0.4);
+    } else if (l.kind === "snipe") {
+      burst(l.sx, l.sy, "#ffffff", 10, 220, 0.3);
+    } else if (l.kind === "cone") {
+      burst(l.ox, l.oy, "#ff6a3d", 14, 160, 0.4);
+    } else if (l.kind === "beacon") {
+      ring(l.x, l.y, 4, 80, "#ff4f7a", 0.6);
+      burst(l.x, l.y, "#ff4f7a", 18, 180, 0.5);
+    }
+  }
+
+  function fireBurst(l) {
+    if (l.kind === "meteor") {
+      for (const p of l.pts) {
+        state.bullets.push({ x: p.x, y: p.y - 240, vx: 0, vy: 300, r: 12, life: 2.5, color: "#ffa040", group: l.gid });
+      }
+    } else if (l.kind === "cone") {
+      for (const a of l.angles) {
+        state.bullets.push({ x: l.ox, y: l.oy, vx: Math.cos(a) * 240, vy: Math.sin(a) * 240,
+          r: 6, life: 3, color: "#ff6a3d", group: l.gid });
+      }
     } else {
+      const n = 10, off = rand(0, Math.PI * 2);
+      for (let i = 0; i < n; i++) {
+        const a = off + (i / n) * Math.PI * 2;
+        state.bullets.push({ x: l.x, y: l.y, vx: Math.cos(a) * 150, vy: Math.sin(a) * 150,
+          r: 5, life: 4, color: "#ff4f7a", group: l.gid });
+      }
+    }
+  }
+
+  function sparkAlongLong(l) {
+    if (l.kind === "h") spark1(rand(BOX.x, BOX.x + BOX.w), l.y, rand(-60, 60), rand(-90, 90), "#ffd0d0", 0.3);
+    else spark1(l.x, rand(BOX.y, BOX.y + BOX.h), rand(-90, 90), rand(-60, 60), "#ffd0d0", 0.3);
+  }
+
+  // ---------- UPDATE ----------
+  function update(dt) {
+    const s = state;
+    s.time += dt;
+    s.invuln -= dt;
+    s.shake = Math.max(0, s.shake - dt * 30);
+    s.flash = Math.max(0, s.flash - dt * 3);
+
+    let dx = 0, dy = 0;
+    if (keys["ArrowLeft"] || keys["KeyA"]) dx -= 1;
+    if (keys["ArrowRight"] || keys["KeyD"]) dx += 1;
+    if (keys["ArrowUp"] || keys["KeyW"]) dy -= 1;
+    if (keys["ArrowDown"] || keys["KeyS"]) dy += 1;
+    if (dx || dy) {
+      const m = Math.hypot(dx, dy);
+      s.dashDx = dx / m;
+      s.dashDy = dy / m;
+      if (s.dashT <= 0) {
+        heart.x += (dx / m) * SPEED * dt;
+        heart.y += (dy / m) * SPEED * dt;
+      }
+    }
+
+    s.dashCd -= dt;
+    if (s.dashT > 0) {
+      s.dashT -= dt;
+      heart.x += s.dashDx * DASH_SPEED * dt;
+      heart.y += s.dashDy * DASH_SPEED * dt;
+      s.dashTrail.push({ x: heart.x, y: heart.y, life: 0.25 });
+    }
+    if (pointerTarget && s.dashT <= 0) {
+      const ease = Math.min(1, dt * 18);
+      heart.x += (pointerTarget.x - heart.x) * ease;
+      heart.y += (pointerTarget.y - heart.y) * ease;
+    }
+    clampHeart();
+    s.dashTrail = s.dashTrail.filter(p => (p.life -= dt) > 0);
+
+    s.cooldown -= dt;
+    if (s.cooldown <= 0) {
+      spawnTick();
+      s.cooldown = Math.max(0.35, rand(0.6, 1.2) - intensity() * 0.6) * DIFF.spawn;
+    }
+
+    const longDue = Math.floor(s.time / LONG_EVERY);
+    while (s.longCount < longDue && activeAttacks() < DIFF.maxAttacks) {
+      s.longCount++;
+      spawnLong();
+    }
+
+    // Arena stretch: its own timer, never counts toward the cap
+    const STRETCH_TIME = 6.5;
+    if (s.stretchT > 0) {
+      s.stretchT -= dt;
+    } else {
+      s.stretchCd -= dt;
+      if (s.stretchCd <= 0 && s.time > 10) {
+        s.stretchT = STRETCH_TIME;
+        s.stretchAxis = Math.random() < 0.5 ? "h" : "v";
+        s.stretchCd = rand(12, 16);
+        ring(BOX.x + BOX.w / 2, BOX.y + BOX.h / 2, 30, 420, "#7fd7ff", 0.9);
+      }
+    }
+    let grow = 0;
+    if (s.stretchT > 0) {
+      const elapsed = STRETCH_TIME - s.stretchT;
+      grow = Math.min(1, elapsed / 0.8, s.stretchT / 0.8);
+    }
+    s.stretchAmt = grow * (s.stretchAxis === "h" ? 120 : 40);
+    BOX = s.stretchAxis === "h"
+      ? { x: BASE_BOX.x - s.stretchAmt / 2, y: BASE_BOX.y, w: BASE_BOX.w + s.stretchAmt, h: BASE_BOX.h }
+      : { x: BASE_BOX.x, y: BASE_BOX.y - s.stretchAmt / 2, w: BASE_BOX.w, h: BASE_BOX.h + s.stretchAmt };
+    clampHeart();
+
+    // Telegraphed attacks
+    for (const l of s.lasers) {
+      if (!l.scaled) { l.scaled = true; l.warn *= DIFF.warn; }
+      l.age += dt;
+
+      if (l.kind === "spiral") {
+        if (l.age > l.warn && l.age < l.warn + l.fire) {
+          l.acc += dt;
+          while (l.acc >= 0.12) {
+            l.acc -= 0.12;
+            s.bullets.push({ x: l.x, y: l.y, vx: Math.cos(l.ang) * 130, vy: Math.sin(l.ang) * 130,
+              r: 5, life: 5, color: "#ffa050", group: l.gid });
+            l.ang += 0.55;
+          }
+        }
+        continue;
+      }
+
+      if (l.kind === "cone" || l.kind === "beacon" || l.kind === "meteor") {
+        if (!l.fired && l.age >= l.warn) { l.fired = true; fireBurst(l); onFire(l); }
+        continue;
+      }
+
+      if (l.kind === "crush") {
+        if (l.age > l.warn && l.age < l.warn + l.fire) {
+          const { band, gap } = crushParts(l);
+          if (inRect(heart.x, heart.y, heart.r, band) && !inRect(heart.x, heart.y, heart.r, gap)) damage();
+        }
+        continue;
+      }
+
+      const firing = l.age > l.warn && l.age < l.warn + l.fire;
+      if (!firing) continue;
+      if (!l.boom) { l.boom = true; onFire(l); }
+
+      let hit = false;
+      if (l.kind === "h") hit = Math.abs(heart.y - l.y) < heart.r + (l.long ? 16 : 6);
+      else if (l.kind === "v") hit = Math.abs(heart.x - l.x) < heart.r + (l.long ? 16 : 6);
+      else if (l.kind === "eye") {
+        const g = eyeSegment(l);
+        hit = distToSegment(heart.x, heart.y, g.x1, g.y1, g.x2, g.y2) < heart.r + 5;
+      } else if (l.kind === "pulse") {
+        hit = dist(heart.x, heart.y, l.x, l.y) < l.R + heart.r;
+      } else if (l.kind === "pillar") {
+        hit = pillarRects(l).some(r => inRect(heart.x, heart.y, heart.r, r));
+      } else if (l.kind === "snipe" && !l.fired) {
+        l.fired = true;
+        s.bullets.push({ x: l.sx, y: l.sy, vx: Math.cos(l.ang) * 620, vy: Math.sin(l.ang) * 620,
+          r: 5, life: 1.5, color: "#ffffff" });
+      }
+
+      if (l.long && Math.random() < 0.5) sparkAlongLong(l);
+      if (hit) damage();
+    }
+    s.lasers = s.lasers.filter(l => l.age < l.warn + l.fire + 0.1);
+
+    // Bullets
+    for (const b of s.bullets) {
+      if (b.orbit) {
+        b.orbit.ang += b.orbit.av * dt;
+        b.x = b.orbit.cx + Math.cos(b.orbit.ang) * b.orbit.R;
+        b.y = b.orbit.cy + Math.sin(b.orbit.ang) * b.orbit.R;
+      }
+      if (b.homing) {
+        const ang = Math.atan2(heart.y - b.y, heart.x - b.x);
+        const sp = Math.hypot(b.vx, b.vy);
+        const cur = Math.atan2(b.vy, b.vx);
+        let diff = ang - cur;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        const turn = Math.max(-1.0 * dt, Math.min(1.0 * dt, diff));
+        const newAng = cur + turn;
+        b.vx = Math.cos(newAng) * sp;
+        b.vy = Math.sin(newAng) * sp;
+      }
+      b.x += b.vx * dt * DIFF.speed;
+      b.y += b.vy * dt * DIFF.speed;
+      b.life -= dt;
+
+      b.trail = b.trail || [];
+      b.trail.push({ x: b.x, y: b.y });
+      if (b.trail.length > 5) b.trail.shift();
+
+      if (b.bounce) {
+        if (b.x < BOX.x + b.r || b.x > BOX.x + BOX.w - b.r) {
+          b.vx = -b.vx; b.bounces--;
+          b.x = Math.max(BOX.x + b.r, Math.min(BOX.x + BOX.w - b.r, b.x));
+          burst(b.x, b.y, b.color, 3, 60, 0.2);
+        }
+        if (b.y < BOX.y + b.r || b.y > BOX.y + BOX.h - b.r) {
+          b.vy = -b.vy; b.bounces--;
+          b.y = Math.max(BOX.y + b.r, Math.min(BOX.y + BOX.h - b.r, b.y));
+          burst(b.x, b.y, b.color, 3, 60, 0.2);
+        }
+        if (b.bounces < 0) b.dead = true;
+      }
+      if (dist(b.x, b.y, heart.x, heart.y) < b.r + heart.r - 2) {
+        b.dead = true;
+        damage();
+      }
+    }
+    s.bullets = s.bullets.filter(b => !b.dead && b.life > 0 &&
+      b.x > -60 && b.x < W + 60 && b.y > -60 && b.y < H + 60);
+
+    if (s.time >= SURVIVE && s.running) {
+      s.running = false;
+      endFight("YOU SURVIVED", "Survived " + SURVIVE + " of " + SURVIVE + " seconds.");
+    }
+  }
+
+  function tryDash() {
+    if (!state || !state.running || state.dashCd > 0) return;
+    state.dashT = DASH_TIME;
+    state.dashCd = DASH_COOLDOWN;
+    burst(heart.x, heart.y, "#7fe8ff", 10, 120, 0.35);
+  }
+
+  function damage() {
+    if (!state.running || state.invuln > 0 || state.dashT > 0) return;
+    state.hp -= HIT_DMG;
+    state.invuln = INVULN;
+    state.shake = 14;
+    state.flash = 1;
+    burst(heart.x, heart.y, "#ff1a2e", 26, 220, 0.6);
+    ring(heart.x, heart.y, 6, 70, "#ff3344", 0.45);
+    if (state.hp <= 0) {
+      state.hp = 0;
+      state.running = false;
+      endFight("YOU DIED", "Survived " + Math.floor(state.time) + " of " + SURVIVE + " seconds.");
+    }
+  }
+
+  // ---------- DRAWING ----------
+  function seg(x1, y1, x2, y2) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); }
+
+  function drawBeam(x1, y1, x2, y2, w, color, alpha) {
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = alpha * 0.22; ctx.lineWidth = w * 3.2; seg(x1, y1, x2, y2);
+    ctx.globalAlpha = alpha * 0.55; ctx.lineWidth = w * 1.6; seg(x1, y1, x2, y2);
+    ctx.globalAlpha = alpha; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = Math.max(2, w * 0.35);
+    seg(x1, y1, x2, y2);
+    ctx.restore();
+  }
+
+  function drawWarnLine(x1, y1, x2, y2, color, alpha, width) {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = alpha;
+    ctx.lineWidth = width;
+    ctx.setLineDash([12, 10]);
+    ctx.lineDashOffset = -clock * 90;
+    seg(x1, y1, x2, y2);
+    ctx.restore();
+  }
+
+  function hazardRect(x, y, w, h, color) {
+    if (w <= 0 || h <= 0) return;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = "rgba(0,0,0,0.5)";
+    const off = (clock * 40) % 18;
+    for (let i = -h + off; i < w + h; i += 18) {
+      ctx.beginPath();
+      ctx.moveTo(x + i, y + h); ctx.lineTo(x + i + h, y);
+      ctx.lineTo(x + i + h + 9, y); ctx.lineTo(x + i + 9, y + h);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function heartShape(x, y, s) {
+    ctx.beginPath();
+    ctx.moveTo(x, y + s * 0.35);
+    ctx.bezierCurveTo(x, y - s * 0.2, x - s, y - s * 0.2, x - s, y + s * 0.1);
+    ctx.bezierCurveTo(x - s, y + s * 0.6, x, y + s * 0.8, x, y + s);
+    ctx.bezierCurveTo(x, y + s * 0.8, x + s, y + s * 0.6, x + s, y + s * 0.1);
+    ctx.bezierCurveTo(x + s, y - s * 0.2, x, y - s * 0.2, x, y + s * 0.35);
+    ctx.closePath();
+  }
+
+  function diamond(s) {
+    ctx.beginPath();
+    ctx.moveTo(0, -s); ctx.lineTo(s * 0.7, 0); ctx.lineTo(0, s); ctx.lineTo(-s * 0.7, 0);
+    ctx.closePath();
+  }
+
+  function drawLaser(l, warning, pulse) {
+    if (l.kind === "h" || l.kind === "v") {
+      let x1, y1, x2, y2;
+      if (l.kind === "h") { x1 = BOX.x; y1 = l.y; x2 = BOX.x + BOX.w; y2 = l.y; }
+      else { x1 = l.x; y1 = BOX.y; x2 = l.x; y2 = BOX.y + BOX.h; }
+      if (warning) drawWarnLine(x1, y1, x2, y2, "#ff3344", 0.35 + 0.35 * pulse, l.long ? 4 : 2);
+      else if (l.long) drawBeam(x1, y1, x2, y2, 14, "#ff2a3d", 1);
+      else drawBeam(x1, y1, x2, y2, 6, "#ff3344", 1);
+      return;
+    }
+
+    if (l.kind === "pillar") {
+      for (const r of pillarRects(l)) {
+        if (warning) {
+          ctx.save();
+          ctx.setLineDash([10, 8]);
+          ctx.lineDashOffset = -clock * 70;
+          ctx.strokeStyle = "rgba(255,80,90," + (0.4 + 0.4 * pulse) + ")";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(r.x, r.y, r.w, r.h);
+          ctx.fillStyle = "rgba(255,50,70,0.08)";
+          ctx.fillRect(r.x, r.y, r.w, r.h);
+          ctx.restore();
+        } else {
+          const g = ctx.createLinearGradient(r.x, 0, r.x + r.w, 0);
+          g.addColorStop(0, "rgba(255,40,60,0.5)");
+          g.addColorStop(0.5, "rgba(255,200,200,0.95)");
+          g.addColorStop(1, "rgba(255,40,60,0.5)");
+          ctx.fillStyle = g;
+          ctx.fillRect(r.x, r.y, r.w, r.h);
+        }
+      }
+      return;
+    }
+
+    if (l.kind === "meteor") {
+      for (const p of l.pts) {
+        const k = l.age / l.warn;
+        ctx.save();
+        ctx.strokeStyle = "rgba(255,160,64," + (0.4 + 0.4 * pulse) + ")";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 8]);
+        ctx.lineDashOffset = -clock * 60;
+        ctx.beginPath(); ctx.moveTo(p.x, BOX.y); ctx.lineTo(p.x, BOX.y + BOX.h); ctx.stroke();
+        ctx.restore();
+        if (warning) {
+          ctx.strokeStyle = "rgba(255,160,64,0.9)";
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(p.x, p.y, 24 - 14 * k, 0, Math.PI * 2); ctx.stroke();
+          ctx.fillStyle = "rgba(255,120,40,0.2)";
+          ctx.beginPath(); ctx.arc(p.x, p.y, 16, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      return;
+    }
+
+    if (l.kind === "eye") {
+      if (warning) {
+        const endA = l.a + l.spin * l.fire;
+        const g = ctx.createRadialGradient(l.ox, l.oy, 0, l.ox, l.oy, EYE_RANGE);
+        g.addColorStop(0, "rgba(255,50,70,0.04)");
+        g.addColorStop(1, "rgba(255,50,70,0.3)");
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.moveTo(l.ox, l.oy);
+        ctx.arc(l.ox, l.oy, EYE_RANGE, l.a, endA, l.spin < 0);
+        ctx.closePath(); ctx.fill();
+        drawWarnLine(l.ox, l.oy, l.ox + Math.cos(l.a) * EYE_RANGE, l.oy + Math.sin(l.a) * EYE_RANGE,
+          "#ff3344", 0.5 + 0.3 * pulse, 2);
+        drawWarnLine(l.ox, l.oy, l.ox + Math.cos(endA) * EYE_RANGE, l.oy + Math.sin(endA) * EYE_RANGE,
+          "#ff3344", 0.5 + 0.3 * pulse, 2);
+      } else {
+        const g = eyeSegment(l);
+        drawBeam(g.x1, g.y1, g.x2, g.y2, 8, "#ff3344", 1);
+      }
+      return;
+    }
+
+    if (l.kind === "pulse") {
+      if (warning) {
+        const p = l.age / l.warn;
+        ctx.fillStyle = "rgba(255,50,70," + (0.08 + 0.12 * p) + ")";
+        ctx.beginPath(); ctx.arc(l.x, l.y, l.R, 0, Math.PI * 2); ctx.fill();
+        ctx.save();
+        ctx.setLineDash([8, 8]);
+        ctx.lineDashOffset = -clock * 60;
+        ctx.strokeStyle = "rgba(255,80,90,0.9)";
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(l.x, l.y, l.R * (1.6 - 0.6 * p), 0, Math.PI * 2); ctx.stroke();
+        ctx.restore();
+      } else {
+        const g = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, l.R);
+        g.addColorStop(0, "rgba(255,255,255,0.9)");
+        g.addColorStop(0.4, "rgba(255,60,80,0.9)");
+        g.addColorStop(1, "rgba(255,30,60,0.2)");
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(l.x, l.y, l.R, 0, Math.PI * 2); ctx.fill();
+      }
+      return;
+    }
+
+    if (l.kind === "snipe") {
+      const ex = l.sx + Math.cos(l.ang) * 900, ey = l.sy + Math.sin(l.ang) * 900;
+      if (warning) {
+        drawWarnLine(l.sx, l.sy, ex, ey, "#ff3344", 0.35 + 0.35 * pulse, 2);
+        const tx = l.sx + Math.cos(l.ang) * 500, ty = l.sy + Math.sin(l.ang) * 500;
+        const p = l.age / l.warn;
+        ctx.save();
+        ctx.strokeStyle = "rgba(255,80,90," + (0.5 + 0.5 * pulse) + ")";
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(tx, ty, 6 + 14 * (1 - p), 0, Math.PI * 2); ctx.stroke();
+        ctx.restore();
+      } else {
+        drawBeam(l.sx, l.sy, ex, ey, 3, "#ffffff", 1);
+      }
+      return;
+    }
+
+    if (l.kind === "cone") {
+      if (warning) {
+        ctx.fillStyle = "rgba(255,106,61," + (0.08 + 0.06 * pulse) + ")";
+        ctx.beginPath(); ctx.moveTo(l.ox, l.oy);
+        ctx.arc(l.ox, l.oy, 900, l.angles[0], l.angles[l.angles.length - 1]);
+        ctx.closePath(); ctx.fill();
+        for (const a of l.angles) {
+          drawWarnLine(l.ox, l.oy, l.ox + Math.cos(a) * 900, l.oy + Math.sin(a) * 900,
+            "#ff6a3d", 0.5 + 0.3 * pulse, 2);
+        }
+      }
+      return;
+    }
+
+    if (l.kind === "beacon") {
+      if (warning) {
+        const p = l.age / l.warn;
+        ctx.fillStyle = "rgba(255,79,122," + (0.15 + 0.35 * p) + ")";
+        ctx.beginPath(); ctx.arc(l.x, l.y, 4 + 14 * p, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = "rgba(255,79,122,0.85)";
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(l.x, l.y, 30 - 20 * p, 0, Math.PI * 2); ctx.stroke();
+      }
+      return;
+    }
+
+    if (l.kind === "crush") {
+      const { band, gap } = crushParts(l);
+      ctx.save();
+      ctx.globalAlpha = warning ? 0.5 : 1;
+      const col = warning ? "#ff8a2a" : "#ff3344";
+      if (l.horiz) {
+        hazardRect(band.x, band.y, gap.x - band.x, band.h, col);
+        hazardRect(gap.x + gap.w, band.y, band.x + band.w - (gap.x + gap.w), band.h, col);
+      } else {
+        hazardRect(band.x, band.y, band.w, gap.y - band.y, col);
+        hazardRect(band.x, gap.y + gap.h, band.w, band.y + band.h - (gap.y + gap.h), col);
+      }
+      ctx.fillStyle = "rgba(120,255,220,0.18)";
+      ctx.fillRect(gap.x, gap.y, gap.w, gap.h);
+      ctx.restore();
+      return;
+    }
+
+    if (l.kind === "spiral") {
+      if (warning) {
+        const p = l.age / l.warn;
+        for (let k = 0; k < 8; k++) {
+          const a = k * Math.PI / 4 + clock * 2;
+          const rr = 120 * (1 - p) + 4;
+          ctx.fillStyle = "rgba(255,150,80,0.9)";
+          ctx.beginPath(); ctx.arc(l.x + Math.cos(a) * rr, l.y + Math.sin(a) * rr, 3, 0, Math.PI * 2); ctx.fill();
+        }
+      } else {
+        const g = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, 26);
+        g.addColorStop(0, "rgba(255,220,160,0.9)");
+        g.addColorStop(1, "rgba(255,120,40,0)");
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(l.x, l.y, 26, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+  }
+
+  function drawBullets() {
+    const seenOrbit = new Set();
+    for (const b of state.bullets) {
+      if (b.orbit && !seenOrbit.has(b.group)) {
+        seenOrbit.add(b.group);
+        ctx.save();
+        ctx.strokeStyle = "rgba(255,224,102,0.12)";
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(b.orbit.cx, b.orbit.cy, b.orbit.R, 0, Math.PI * 2); ctx.stroke();
+        ctx.restore();
+      }
+      const c = b.color || "#ffffff";
+      if (b.trail) {
+        for (let i = 0; i < b.trail.length; i++) {
+          const tp = b.trail[i], f = (i + 1) / b.trail.length;
+          ctx.globalAlpha = f * 0.3;
+          ctx.fillStyle = c;
+          ctx.beginPath(); ctx.arc(tp.x, tp.y, b.r * (0.4 + 0.6 * f), 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      ctx.globalAlpha = 1;
+      if (b.orbit) {
+        ctx.save();
+        ctx.translate(b.x, b.y);
+        ctx.rotate(clock * 6);
+        ctx.fillStyle = c; diamond(b.r * 1.5); ctx.fill();
+        ctx.fillStyle = "#ffffff"; diamond(b.r * 0.6); ctx.fill();
+        ctx.restore();
+      } else {
+        ctx.globalAlpha = 0.25;
+        ctx.fillStyle = c;
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 2.3, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#ffffff";
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 0.45, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function draw() {
+    const pulse = 0.5 + 0.5 * Math.sin(clock * 12);
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, W, H);
+    drawEmbers();
+
+    ctx.save();
+    if (state.shake > 0) {
+      ctx.translate((Math.random() - 0.5) * state.shake, (Math.random() - 0.5) * state.shake);
+    }
+
+    const floor = ctx.createLinearGradient(0, BOX.y, 0, BOX.y + BOX.h);
+    floor.addColorStop(0, "#22000a");
+    floor.addColorStop(1, "#050005");
+    ctx.fillStyle = floor;
+    ctx.fillRect(BOX.x, BOX.y, BOX.w, BOX.h);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(BOX.x, BOX.y, BOX.w, BOX.h); ctx.clip();
+    ctx.strokeStyle = "rgba(255,60,80,0.08)";
+    ctx.lineWidth = 1;
+    const go = (clock * 20) % 34;
+    for (let x = BOX.x + go; x < BOX.x + BOX.w; x += 34) seg(x, BOX.y, x, BOX.y + BOX.h);
+    for (let y = BOX.y + go; y < BOX.y + BOX.h; y += 34) seg(BOX.x, y, BOX.x + BOX.w, y);
+    ctx.restore();
+
+    // The Warden
+    const bx = W / 2, by = 48;
+    const ang = Math.atan2(heart.y - by, heart.x - bx);
+    const angry = intensity();
+    const breathe = Math.sin(clock * 2) * 2;
+    ctx.save();
+    ctx.fillStyle = "rgba(" + Math.round(120 + 135 * angry) + ",30,50,0.9)";
+    for (let i = 0; i < 10; i++) {
+      const a = i * Math.PI * 2 / 10 + clock * 0.4;
+      const r2 = 34 + breathe + 4 * Math.sin(clock * 5 + i);
+      ctx.beginPath();
+      ctx.moveTo(bx + Math.cos(a - 0.12) * 22, by + Math.sin(a - 0.12) * 22);
+      ctx.lineTo(bx + Math.cos(a) * r2, by + Math.sin(a) * r2);
+      ctx.lineTo(bx + Math.cos(a + 0.12) * 22, by + Math.sin(a + 0.12) * 22);
+      ctx.closePath(); ctx.fill();
+    }
+    const core = ctx.createRadialGradient(bx, by, 2, bx, by, 22);
+    core.addColorStop(0, "#3a0010");
+    core.addColorStop(1, "#0a0006");
+    ctx.fillStyle = core;
+    ctx.beginPath(); ctx.arc(bx, by, 22, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#ff3344"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.ellipse(bx, by, 12, 7, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#ff1a2e";
+    ctx.beginPath(); ctx.arc(bx + Math.cos(ang) * 3.2, by + Math.sin(ang) * 3.2, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#000";
+    ctx.beginPath(); ctx.arc(bx + Math.cos(ang) * 4, by + Math.sin(ang) * 4, 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+
+    for (const l of state.lasers) drawLaser(l, l.age <= l.warn, pulse);
+    drawBullets();
+    drawFx();
+
+    ctx.save();
+    ctx.shadowColor = "#ff3344";
+    ctx.shadowBlur = 18;
+    ctx.strokeStyle = "rgba(255,255,255," + (0.7 + 0.3 * pulse) + ")";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(BOX.x, BOX.y, BOX.w, BOX.h);
+    ctx.restore();
+
+    for (const p of state.dashTrail) {
+      ctx.globalAlpha = Math.max(0, p.life / 0.25) * 0.45;
+      ctx.fillStyle = "#7fe8ff";
+      heartShape(p.x, p.y - 2, 7.5);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    const dashing = state.dashT > 0;
+    if (dashing || state.invuln <= 0 || Math.floor(state.invuln * 14) % 2 === 0) {
+      ctx.save();
+      ctx.shadowColor = dashing ? "#7fe8ff" : "#ff1a2e";
+      ctx.shadowBlur = 16;
+      ctx.fillStyle = dashing ? "#d8faff" : "#ff1a2e";
+      heartShape(heart.x, heart.y - 2, 7.5);
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore();
+
+    const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 0.75);
+    vg.addColorStop(0, "rgba(0,0,0,0)");
+    vg.addColorStop(1, "rgba(" + Math.round(40 * intensity()) + ",0,0," + (0.55 + 0.25 * intensity()) + ")");
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, W, H);
+    if (state.flash > 0) {
+      ctx.fillStyle = "rgba(255,0,20," + (state.flash * 0.3) + ")";
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // HUD
+    const diff = Math.round(intensity() * 100);
+    const tier = diff < 25 ? "UNEASY" : diff < 50 ? "DANGEROUS" : diff < 75 ? "HELLISH" : "HELL";
+    ctx.font = "14px 'Courier New', monospace";
+    ctx.fillStyle = "#fff";
+    ctx.textAlign = "left";
+    ctx.fillText("MODE: " + selectedDiff.toUpperCase(), BOX.x, 92);
+    ctx.textAlign = "right";
+    ctx.fillText(state.dashCd > 0 ? "DASH " + state.dashCd.toFixed(1) + "s" : "DASH READY", BOX.x + BOX.w, 92);
+
+    ctx.fillStyle = "#2a0a10";
+    ctx.fillRect(BOX.x, 98, BOX.w, 8);
+    ctx.save();
+    ctx.fillStyle = diff < 50 ? "#ffaa33" : "#ff3344";
+    ctx.shadowColor = ctx.fillStyle;
+    ctx.shadowBlur = 8;
+    ctx.fillRect(BOX.x, 98, BOX.w * diff / 100, 8);
+    ctx.restore();
+
+    ctx.fillStyle = "#fff";
+    ctx.textAlign = "left";
+    ctx.fillText("INTENSITY: " + tier + " " + diff + "%", BOX.x, 120);
+    ctx.textAlign = "right";
+    ctx.fillText("ATTACKS " + activeAttacks() + "/" + DIFF.maxAttacks, BOX.x + BOX.w, 120);
+
+    ctx.textAlign = "left";
+    ctx.fillText("HP", BOX.x, 450);
+    ctx.fillStyle = "#2a0a10";
+    ctx.fillRect(BOX.x + 40, 436, 200, 18);
+    ctx.fillStyle = "#ff1a2e";
+    ctx.fillRect(BOX.x + 40, 436, 200 * (state.hp / MAX_HP), 18);
+    ctx.fillStyle = "#fff";
+    ctx.textAlign = "right";
+    ctx.fillText(state.hp + " / " + MAX_HP, BOX.x + BOX.w, 450);
+    ctx.textAlign = "left";
+    ctx.fillText("SURVIVE " + Math.max(0, Math.ceil(SURVIVE - state.time)) + "s", BOX.x, 474);
+    if (state.stretchT > 0) {
+      ctx.fillStyle = "#7fd7ff";
+      ctx.textAlign = "right";
+      ctx.fillText(state.stretchAxis === "h" ? "ARENA STRETCH: WIDE" : "ARENA STRETCH: TALL", BOX.x + BOX.w, 474);
+    }
+  }
+
+  function start(diff) {
+    selectedDiff = diff;
+    DIFF = PRESETS[diff];
+    reset();
+    state.running = true;
+  }
+
+  function frame(dt) {
+    clock += dt;
+    updateFx(dt);
+    if (state && state.running) update(dt);
+    if (state) draw();
+  }
+
+  return {
+    name: "THE WARDEN",
+    start,
+    frame,
+    setPointer: (p) => { pointerTarget = p; },
+    dash: () => tryDash(),
+    stop: () => { if (state) state.running = false; },
+    isRunning: () => !!(state && state.running)
+  };
+})();
+
+// ======================================================================
+// FIGHT 2: SKRULL DEATH
+// ======================================================================
+const SKRULL = (() => {
+  const keys = input.keys;
+  const BOX = { x: 150, y: 130, w: 340, h: 280 };
+  const BOSS_Y = 50;
+  const SURVIVE = 90;
+  const MAX_HP = 48;
+  const HIT_DMG = 4;
+  const INVULN = 0.6;
+  const SPEED = 230;
+  const DASH_SPEED = 900;
+  const DASH_TIME = 0.15;
+  const DASH_COOLDOWN = 1.0;
+  const MAX_ATTACKS_PER_TICK = 2;
+  const FORM_TIME = 22;
+
+  const FORMS = [
+    { name: "SHELL",     c1: "#9dff5c", c2: "#1f5b2a" },
+    { name: "SWARM",     c1: "#e0ff5c", c2: "#4a5a10" },
+    { name: "VOID",      c1: "#b07cff", c2: "#2a1152" },
+    { name: "TRUE FORM", c1: "#ff7a7a", c2: "#4a1020" }
+  ];
+
+  // Attack weights per form, in this order: mirror, acid, spores, tendrils, clones, rift
+  const WEIGHTS = [
+    [1.2, 1.0, 0.9, 1.0, 0.3, 0.2],
+    [0.7, 0.6, 1.3, 0.9, 1.2, 0.4],
+    [0.5, 0.8, 0.6, 0.7, 0.5, 1.4],
+    [1.0, 1.1, 1.0, 1.1, 1.0, 1.0]
+  ];
+
+  let DIFF = PRESETS.normal;
+  let selectedDiff = "normal";
+  let state = null, heart = null, pointerTarget = null;
+  let fx = [];
+  let clock = 0;
+  const spores = Array.from({ length: 50 }, () => newSpore(true));
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function dist(ax, ay, bx, by) { return Math.hypot(ax - bx, ay - by); }
+  function intensity() { return Math.min(1, state.time / SURVIVE); }
+  function formIndex() { return Math.min(3, Math.floor(state.time / FORM_TIME)); }
+  function bossX() { return W / 2 + Math.sin(clock * 0.35) * 150; }
+  function newSpore(anywhere) {
+    return { x: rand(0, W), y: anywhere ? rand(0, H) : H + 10, vy: rand(8, 26), s: rand(1, 2.4), a: rand(0.15, 0.45) };
+  }
+
+  function reset() {
+    state = {
+      running: false, time: 0, hp: MAX_HP, invuln: 0, shake: 0, flash: 0, cooldown: 1.0,
+      lasers: [], bullets: [], gid: 0,
+      dashCd: 0, dashT: 0, dashDx: 0, dashDy: -1, dashTrail: [],
+      form: 0, announce: 2.5
+    };
+    heart = { x: BOX.x + BOX.w / 2, y: BOX.y + BOX.h / 2, r: 6 };
+    pointerTarget = null;
+    fx = [];
+  }
+
+  function clampHeart() {
+    heart.x = Math.max(BOX.x + heart.r, Math.min(BOX.x + BOX.w - heart.r, heart.x));
+    heart.y = Math.max(BOX.y + heart.r, Math.min(BOX.y + BOX.h - heart.r, heart.y));
+  }
+
+  function inRect(px, py, r, rect) {
+    return px > rect.x - r && px < rect.x + rect.w + r && py > rect.y - r && py < rect.y + rect.h + r;
+  }
+
+  function pushLaser(l) { l.gid = ++state.gid; state.lasers.push(l); return l; }
+  function addGroup(arr) { const g = ++state.gid; for (const b of arr) b.group = g; state.bullets.push(...arr); }
+  function kindActive(kind) { return state.lasers.some(l => l.kind === kind && l.age < l.warn + l.fire + 0.1); }
+  function activeAttacks() {
+    const ids = new Set();
+    for (const l of state.lasers) if (l.age < l.warn + l.fire + 0.1) ids.add(l.gid);
+    for (const b of state.bullets) if (b.group) ids.add(b.group);
+    return ids.size;
+  }
+
+  // ---------- PARTICLES ----------
+  function burst(x, y, color, n, speed, life) {
+    for (let i = 0; i < n; i++) {
+      const a = rand(0, Math.PI * 2), sp = rand(speed * 0.3, speed);
+      fx.push({ type: "spark", x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life, max: life, color, size: rand(1.5, 3.5) });
+    }
+  }
+  function ring(x, y, r0, r1, color, life) { fx.push({ type: "ring", x, y, r0, r1, color, life, max: life }); }
+
+  function updateFx(dt) {
+    for (const p of fx) {
+      p.life -= dt;
+      if (p.type === "spark") { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.92; p.vy *= 0.92; }
+    }
+    fx = fx.filter(p => p.life > 0);
+    for (const e of spores) {
+      e.y -= e.vy * dt;
+      if (e.y < -10) { e.y = H + 10; e.x = rand(0, W); }
+    }
+  }
+
+  function drawFx() {
+    for (const p of fx) {
+      const a = Math.max(0, p.life / p.max);
+      if (p.type === "spark") {
+        ctx.globalAlpha = a;
+        ctx.fillStyle = p.color;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.size * (0.5 + a * 0.5), 0, Math.PI * 2); ctx.fill();
+      } else {
+        const rr = p.r0 + (p.r1 - p.r0) * (1 - a);
+        ctx.globalAlpha = a;
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = 3 * a + 1;
+        ctx.beginPath(); ctx.arc(p.x, p.y, rr, 0, Math.PI * 2); ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawSpores() {
+    for (const e of spores) {
+      ctx.globalAlpha = e.a * (0.6 + 0.4 * Math.sin(clock * 2 + e.x));
+      ctx.fillStyle = "#9dff5c";
+      ctx.fillRect(e.x, e.y, e.s, e.s);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // ---------- ATTACK CONSTRUCTORS ----------
+  // Mirror: a copy of the heart moves as the mirror image of you, then fires three shots
+  function makeMimic() {
+    const cx = BOX.x + BOX.w / 2, cy = BOX.y + BOX.h / 2;
+    return { kind: "mimic", x: cx, y: cy, age: 0, warn: 1.1, fire: 0.05, once: true, fired: false };
+  }
+
+  function fireOnce(l) {
+    if (l.kind === "spores") {
+      for (const b of seekerBurst()) { b.group = l.gid; state.bullets.push(b); }
+      burst(l.x, l.y, "#9dff5c", 16, 140, 0.4);
+      return;
+    }
+    if (l.kind === "mimic") {
+      const a = Math.atan2(heart.y - l.y, heart.x - l.x);
+      for (const d of [-0.14, 0, 0.14]) {
+        state.bullets.push({ x: l.x, y: l.y, vx: Math.cos(a + d) * 200, vy: Math.sin(a + d) * 200,
+          r: 6, life: 4, color: "#9dff5c", group: l.gid });
+      }
+      burst(l.x, l.y, "#9dff5c", 14, 160, 0.4);
+    }
+  }
+
+  function makeAcid() {
+    const pts = [];
+    const n = 2 + Math.floor(intensity() * 2);
+    for (let i = 0; i < n; i++) {
+      pts.push({ x: rand(BOX.x + 40, BOX.x + BOX.w - 40), y: rand(BOX.y + 40, BOX.y + BOX.h - 40),
+        r: rand(26, 34), ph: rand(0, 6) });
+    }
+    return { kind: "acid", pts, age: 0, warn: 0.9, fire: 4.0 };
+  }
+
+  // Spores: a few slow seekers. They drift outward for about a second, then home in gently.
+  function seekerBurst() {
+    const cx = bossX(), cy = BOSS_Y, out = [];
+    const n = 6 + Math.floor(intensity() * 4);
+    for (let i = 0; i < n; i++) {
+      const a = rand(0, Math.PI * 2), sp = 110;
+      out.push({ x: cx, y: cy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, r: 7, life: 4,
+        color: "#9dff5c", seek: true, delay: rand(0.9, 1.3), turn: rand(0.9, 1.1) });
+    }
+    return out;
+  }
+
+  // Telegraphed: the spores appear after a short warning, so you can see them coming
+  function makeSpores() {
+    return { kind: "spores", x: bossX(), y: BOSS_Y, age: 0, warn: 0.8, fire: 0.05, once: true, fired: false };
+  }
+
+  function waveTendrils() {
+    const out = [];
+    const cols = [0.15, 0.4, 0.65, 0.9];
+    // Only two of the four columns are live, so there is always a clear lane
+    const live = new Set();
+    while (live.size < 2) live.add(Math.floor(Math.random() * 4));
+    for (const c of live) {
+      const bx = BOX.x + cols[c] * BOX.w;
+      const amp = 16 + intensity() * 4;
+      const ph = rand(0, Math.PI * 2);
+      for (let k = 0; k < 7; k++) {
+        out.push({ x: bx, y: BOX.y - 20 - k * 34, vx: 0, vy: 80 + intensity() * 30, r: 5, life: 7,
+          color: "#b6ff6b", wave: { bx, amp, f: 0.04, ph } });
+      }
+    }
+    return out;
+  }
+
+  function makeClones() {
+    return { kind: "clones", xs: [BOX.x + 50, BOX.x + BOX.w / 2, BOX.x + BOX.w - 50], y: BOX.y + 26,
+      age: 0, warn: 1.0, fire: 2.6, nextAt: -1 };
+  }
+
+  function makeRift() {
+    return { kind: "rift", x: rand(BOX.x + 90, BOX.x + BOX.w - 90), y: rand(BOX.y + 90, BOX.y + BOX.h - 90),
+      age: 0, warn: 1.0, fire: 3.0 };
+  }
+
+  // ---------- ATTACK SELECTION ----------
+  function attackList() {
+    const t = state.time, w = WEIGHTS[formIndex()];
+    return [
+      { w: w[0], ok: () => t > 5, run: () => pushLaser(makeMimic()) },
+      { w: w[1], ok: () => t > 8, run: () => pushLaser(makeAcid()) },
+      { w: w[2], ok: () => t > 5 && !kindActive("spores"), run: () => pushLaser(makeSpores()) },
+      { w: w[3], ok: () => t > 12, run: () => addGroup(waveTendrils()) },
+      { w: w[4], ok: () => t > 18 && !kindActive("clones"), run: () => pushLaser(makeClones()) },
+      { w: w[5], ok: () => t > 22 && !kindActive("rift"), run: () => pushLaser(makeRift()) }
+    ];
+  }
+
+  function spawnTick() {
+    const count = Math.random() < 0.3 + intensity() * 0.4 ? 2 : 1;
+    for (let i = 0; i < Math.min(count, MAX_ATTACKS_PER_TICK); i++) {
+      if (activeAttacks() >= DIFF.maxAttacks) break;
+      const list = attackList().filter(a => a.ok());
+      const total = list.reduce((sum, a) => sum + a.w, 0);
+      let r = Math.random() * total;
+      for (const a of list) {
+        r -= a.w;
+        if (r <= 0) { a.run(); break; }
+      }
+    }
+  }
+
+  // ---------- UPDATE ----------
+  function update(dt) {
+    const s = state;
+    s.time += dt;
+    s.invuln -= dt;
+    s.shake = Math.max(0, s.shake - dt * 30);
+    s.flash = Math.max(0, s.flash - dt * 3);
+    s.announce = Math.max(0, s.announce - dt);
+
+    const f = formIndex();
+    if (f !== s.form) {
+      s.form = f;
+      s.announce = 2.5;
+      ring(bossX(), BOSS_Y, 20, 260, FORMS[f].c1, 0.9);
+      burst(bossX(), BOSS_Y, FORMS[f].c1, 24, 200, 0.6);
+    }
+
+    let dx = 0, dy = 0;
+    if (keys["ArrowLeft"] || keys["KeyA"]) dx -= 1;
+    if (keys["ArrowRight"] || keys["KeyD"]) dx += 1;
+    if (keys["ArrowUp"] || keys["KeyW"]) dy -= 1;
+    if (keys["ArrowDown"] || keys["KeyS"]) dy += 1;
+    if (dx || dy) {
+      const m = Math.hypot(dx, dy);
+      s.dashDx = dx / m;
+      s.dashDy = dy / m;
+      if (s.dashT <= 0) {
+        heart.x += (dx / m) * SPEED * dt;
+        heart.y += (dy / m) * SPEED * dt;
+      }
+    }
+
+    s.dashCd -= dt;
+    if (s.dashT > 0) {
+      s.dashT -= dt;
+      heart.x += s.dashDx * DASH_SPEED * dt;
+      heart.y += s.dashDy * DASH_SPEED * dt;
+      s.dashTrail.push({ x: heart.x, y: heart.y, life: 0.25 });
+    }
+    if (pointerTarget && s.dashT <= 0) {
+      const ease = Math.min(1, dt * 18);
+      heart.x += (pointerTarget.x - heart.x) * ease;
+      heart.y += (pointerTarget.y - heart.y) * ease;
+    }
+
+    // Gravity rifts drag the heart toward their centre
+    for (const l of s.lasers) {
+      if (l.kind === "rift" && l.age > l.warn && l.age < l.warn + l.fire) {
+        const rx = l.x - heart.x, ry = l.y - heart.y, d = Math.hypot(rx, ry) || 1;
+        heart.x += (rx / d) * 80 * dt;
+        heart.y += (ry / d) * 80 * dt;
+      }
+    }
+
+    clampHeart();
+    s.dashTrail = s.dashTrail.filter(p => (p.life -= dt) > 0);
+
+    s.cooldown -= dt;
+    if (s.cooldown <= 0) {
+      spawnTick();
+      s.cooldown = Math.max(0.35, rand(0.6, 1.2) - intensity() * 0.6) * DIFF.spawn;
+    }
+
+    for (const l of s.lasers) {
+      if (!l.scaled) { l.scaled = true; l.warn *= DIFF.warn; }
+      l.age += dt;
+
+      if (l.kind === "clones") {
+        if (l.nextAt < 0) l.nextAt = l.warn;
+        if (l.age >= l.nextAt && l.age < l.warn + l.fire) {
+          l.nextAt += 0.9;
+          const off = rand(0, Math.PI / 6);
+          for (const x of l.xs) {
+            for (let i = 0; i < 4; i++) {
+              const a = off + i / 4 * Math.PI * 2;
+              s.bullets.push({ x, y: l.y, vx: Math.cos(a) * 90, vy: Math.sin(a) * 90,
+                r: 5, life: 5, color: "#ffe066", group: l.gid });
+            }
+          }
+        }
+        continue;
+      }
+
+      if (l.kind === "rift") continue;
+
+      if (l.kind === "mimic" && !l.fired) {
+        const cx = BOX.x + BOX.w / 2, cy = BOX.y + BOX.h / 2;
+        l.x = Math.max(BOX.x + 14, Math.min(BOX.x + BOX.w - 14, 2 * cx - heart.x));
+        l.y = Math.max(BOX.y + 14, Math.min(BOX.y + BOX.h - 14, 2 * cy - heart.y));
+      }
+
+      if (l.once) {
+        if (!l.fired && l.age >= l.warn) { l.fired = true; fireOnce(l); }
+        continue;
+      }
+
+      if (l.kind === "acid") {
+        if (l.age > l.warn && l.age < l.warn + l.fire) {
+          if (l.pts.some(p => dist(heart.x, heart.y, p.x, p.y) < p.r + heart.r - 2)) damage();
+        }
+      }
+    }
+    s.lasers = s.lasers.filter(l => l.age < l.warn + l.fire + 0.1);
+
+    for (const b of s.bullets) {
+      if (b.wave) {
+        b.y += b.vy * dt * DIFF.speed;
+        b.x = b.wave.bx + Math.sin(b.y * b.wave.f + b.wave.ph) * b.wave.amp;
+      } else {
+        if (b.seek) {
+          if (b.delay > 0) {
+            b.delay -= dt;
+          } else {
+            const ang = Math.atan2(heart.y - b.y, heart.x - b.x);
+            const sp = Math.hypot(b.vx, b.vy);
+            const cur = Math.atan2(b.vy, b.vx);
+            let diff = ang - cur;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            const turn = Math.max(-b.turn * dt, Math.min(b.turn * dt, diff));
+            b.vx = Math.cos(cur + turn) * sp;
+            b.vy = Math.sin(cur + turn) * sp;
+          }
+        }
+        b.x += b.vx * dt * DIFF.speed;
+        b.y += b.vy * dt * DIFF.speed;
+      }
+      b.life -= dt;
+
+      b.trail = b.trail || [];
+      b.trail.push({ x: b.x, y: b.y });
+      if (b.trail.length > 5) b.trail.shift();
+
+      if (dist(b.x, b.y, heart.x, heart.y) < b.r + heart.r - 2) {
+        b.dead = true;
+        damage();
+      }
+    }
+    s.bullets = s.bullets.filter(b => !b.dead && b.life > 0 &&
+      b.x > -200 && b.x < W + 200 && b.y > -200 && b.y < H + 200);
+
+    if (s.time >= SURVIVE && s.running) {
+      s.running = false;
+      endFight("YOU SURVIVED", "Survived " + SURVIVE + " of " + SURVIVE + " seconds.");
+    }
+  }
+
+  function tryDash() {
+    if (!state || !state.running || state.dashCd > 0) return;
+    state.dashT = DASH_TIME;
+    state.dashCd = DASH_COOLDOWN;
+    burst(heart.x, heart.y, "#7fe8ff", 10, 120, 0.35);
+  }
+
+  function damage() {
+    if (!state.running || state.invuln > 0 || state.dashT > 0) return;
+    state.hp -= HIT_DMG;
+    state.invuln = INVULN;
+    state.shake = 14;
+    state.flash = 1;
+    burst(heart.x, heart.y, "#9dff5c", 22, 200, 0.6);
+    ring(heart.x, heart.y, 6, 70, "#9dff5c", 0.45);
+    burst(heart.x, heart.y, "#ff1a2e", 14, 180, 0.5);
+    if (state.hp <= 0) {
+      state.hp = 0;
+      state.running = false;
+      endFight("YOU DIED", "Survived " + Math.floor(state.time) + " of " + SURVIVE + " seconds.");
+    }
+  }
+
+  // ---------- DRAWING ----------
+  function seg(x1, y1, x2, y2) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); }
+
+  function heartShape(x, y, s) {
+    ctx.beginPath();
+    ctx.moveTo(x, y + s * 0.35);
+    ctx.bezierCurveTo(x, y - s * 0.2, x - s, y - s * 0.2, x - s, y + s * 0.1);
+    ctx.bezierCurveTo(x - s, y + s * 0.6, x, y + s * 0.8, x, y + s);
+    ctx.bezierCurveTo(x, y + s * 0.8, x + s, y + s * 0.6, x + s, y + s * 0.1);
+    ctx.bezierCurveTo(x + s, y - s * 0.2, x, y - s * 0.2, x, y + s * 0.35);
+    ctx.closePath();
+  }
+
+  function drawWarnLine(x1, y1, x2, y2, color, alpha, width) {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = alpha;
+    ctx.lineWidth = width;
+    ctx.setLineDash([10, 8]);
+    ctx.lineDashOffset = -clock * 80;
+    seg(x1, y1, x2, y2);
+    ctx.restore();
+  }
+
+  function drawBlob(x, y, scale, alpha) {
+    const f = FORMS[formIndex()];
+    const ang = Math.atan2(heart.y - y, heart.x - x);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    for (let i = 0; i <= 48; i++) {
+      const a = i / 48 * Math.PI * 2;
+      const r = (30 + 5 * Math.sin(3 * a + clock * 1.6) + 3 * Math.sin(5 * a - clock * 2.3)
+        + 2 * Math.sin(8 * a + clock * 4)) * scale;
+      const px = x + Math.cos(a) * r, py = y + Math.sin(a) * r * 0.9;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    const g = ctx.createRadialGradient(x - 8 * scale, y - 8 * scale, 2, x, y, 36 * scale);
+    g.addColorStop(0, f.c1);
+    g.addColorStop(1, f.c2);
+    ctx.shadowColor = f.c1;
+    ctx.shadowBlur = 18;
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    const eyes = [[-12, -4], [0, -8], [12, -3], [-5, 8], [7, 9]];
+    for (let k = 0; k < eyes.length; k++) {
+      const ex = x + eyes[k][0] * scale, ey = y + eyes[k][1] * scale;
+      const blink = Math.sin(clock * 1.3 + k * 2) > 0.97 ? 0.1 : 1;
+      ctx.fillStyle = "#fff";
+      ctx.beginPath(); ctx.ellipse(ex, ey, 4 * scale, 3 * scale * blink, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#000";
+      ctx.beginPath();
+      ctx.arc(ex + Math.cos(ang) * 1.5 * scale, ey + Math.sin(ang) * 1.5 * scale, 1.6 * scale, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawAttack(l, warning, pulse) {
+    if (l.kind === "spores") {
+      const k = l.age / l.warn;
+      ctx.save();
+      ctx.strokeStyle = "rgba(157,255,92," + (0.4 + 0.5 * pulse) + ")";
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(l.x, l.y, 60 * (1 - k) + 14, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = "rgba(157,255,92,0.15)";
+      ctx.beginPath(); ctx.arc(l.x, l.y, 14 + 10 * k, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      return;
+    }
+    if (l.kind === "mimic") {
+      if (warning) {
+        const k = l.age / l.warn;
+        ctx.save();
+        ctx.globalAlpha = 0.25 + 0.6 * k;
+        ctx.fillStyle = "#9dff5c";
+        heartShape(l.x, l.y - 2, 7.5);
+        ctx.fill();
+        ctx.restore();
+        drawWarnLine(l.x, l.y, heart.x, heart.y, "rgba(157,255,92,0.6)", 0.5 + 0.3 * pulse, 1.5);
+      }
+      return;
+    }
+
+    if (l.kind === "acid") {
+      for (const p of l.pts) {
+        if (warning) {
+          const k = l.age / l.warn;
+          ctx.save();
+          ctx.setLineDash([8, 8]);
+          ctx.lineDashOffset = -clock * 50;
+          ctx.strokeStyle = "rgba(157,255,92," + (0.4 + 0.4 * pulse) + ")";
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(p.x, p.y, p.r * k, 0, Math.PI * 2); ctx.stroke();
+          ctx.restore();
+          ctx.fillStyle = "rgba(157,255,92,0.08)";
+          ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+        } else {
+          ctx.beginPath();
+          for (let i = 0; i <= 24; i++) {
+            const a = i / 24 * Math.PI * 2;
+            const rr = p.r * (1 + 0.08 * Math.sin(3 * a + p.ph + clock * 3));
+            const x = p.x + Math.cos(a) * rr, y = p.y + Math.sin(a) * rr;
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          }
+          ctx.closePath();
+          const g = ctx.createRadialGradient(p.x, p.y, 2, p.x, p.y, p.r);
+          g.addColorStop(0, "rgba(200,255,120,0.9)");
+          g.addColorStop(1, "rgba(60,140,40,0.7)");
+          ctx.fillStyle = g;
+          ctx.fill();
+          ctx.fillStyle = "rgba(230,255,200,0.8)";
+          for (let b = 0; b < 3; b++) {
+            const a2 = p.ph + b * 2.1 + clock, br = p.r * 0.5 * Math.abs(Math.sin(clock * 2 + b));
+            ctx.beginPath(); ctx.arc(p.x + Math.cos(a2) * br, p.y + Math.sin(a2) * br, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      }
+      return;
+    }
+
+    if (l.kind === "rift") {
+      if (warning) {
+        const k = l.age / l.warn;
+        ctx.save();
+        ctx.setLineDash([6, 8]);
+        ctx.lineDashOffset = -clock * 40;
+        ctx.strokeStyle = "rgba(176,124,255,0.9)";
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(l.x, l.y, 50 - 30 * k, 0, Math.PI * 2); ctx.stroke();
+        ctx.restore();
+      } else {
+        const g = ctx.createRadialGradient(l.x, l.y, 2, l.x, l.y, 48);
+        g.addColorStop(0, "rgba(0,0,0,0.95)");
+        g.addColorStop(0.6, "rgba(70,20,120,0.8)");
+        g.addColorStop(1, "rgba(176,124,255,0)");
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(l.x, l.y, 48, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = "rgba(200,160,255,0.8)";
+        ctx.lineWidth = 2;
+        for (let k = 0; k < 3; k++) {
+          const a0 = clock * 3 + k * 2.1;
+          ctx.beginPath(); ctx.arc(l.x, l.y, 24 + k * 8, a0, a0 + 1.6); ctx.stroke();
+        }
+      }
+      return;
+    }
+
+    if (l.kind === "clones") {
+      const alpha = warning ? Math.min(1, l.age / l.warn) * 0.7 : 1;
+      for (const x of l.xs) drawBlob(x, l.y, 0.5, alpha);
+    }
+  }
+
+  function drawBullets() {
+    for (const b of state.bullets) {
+      const c = b.color || "#ffffff";
+      if (b.trail) {
+        for (let i = 0; i < b.trail.length; i++) {
+          const tp = b.trail[i], f = (i + 1) / b.trail.length;
+          ctx.globalAlpha = f * 0.3;
+          ctx.fillStyle = c;
+          ctx.beginPath(); ctx.arc(tp.x, tp.y, b.r * (0.4 + 0.6 * f), 0, Math.PI * 2); ctx.fill();
+        }
+      }
       ctx.globalAlpha = 0.25;
       ctx.fillStyle = c;
       ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 2.3, 0, Math.PI * 2); ctx.fill();
@@ -983,211 +1763,979 @@ function drawBullets() {
       ctx.fillStyle = "#ffffff";
       ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 0.45, 0, Math.PI * 2); ctx.fill();
     }
-  }
-  ctx.globalAlpha = 1;
-}
-
-// ---------- DRAW ----------
-function draw() {
-  const pulse = 0.5 + 0.5 * Math.sin(clock * 12);
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0, 0, W, H);
-  drawEmbers();
-
-  ctx.save();
-  if (state.shake > 0) {
-    ctx.translate((Math.random() - 0.5) * state.shake, (Math.random() - 0.5) * state.shake);
+    ctx.globalAlpha = 1;
   }
 
-  // Arena floor with a moving grid
-  const floor = ctx.createLinearGradient(0, BOX.y, 0, BOX.y + BOX.h);
-  floor.addColorStop(0, "#22000a");
-  floor.addColorStop(1, "#050005");
-  ctx.fillStyle = floor;
-  ctx.fillRect(BOX.x, BOX.y, BOX.w, BOX.h);
-  ctx.save();
-  ctx.beginPath(); ctx.rect(BOX.x, BOX.y, BOX.w, BOX.h); ctx.clip();
-  ctx.strokeStyle = "rgba(255,60,80,0.08)";
-  ctx.lineWidth = 1;
-  const go = (clock * 20) % 34;
-  for (let x = BOX.x + go; x < BOX.x + BOX.w; x += 34) seg(x, BOX.y, x, BOX.y + BOX.h);
-  for (let y = BOX.y + go; y < BOX.y + BOX.h; y += 34) seg(BOX.x, y, BOX.x + BOX.w, y);
-  ctx.restore();
+  function draw() {
+    const pulse = 0.5 + 0.5 * Math.sin(clock * 12);
+    const f = FORMS[formIndex()];
 
-  // The Warden: spikes that pulse, and an eye that follows your heart
-  const bx = W / 2, by = 48;
-  const ang = Math.atan2(heart.y - by, heart.x - bx);
-  const angry = intensity();
-  const breathe = Math.sin(clock * 2) * 2;
-  ctx.save();
-  ctx.fillStyle = "rgba(" + Math.round(120 + 135 * angry) + ",30,50,0.9)";
-  for (let i = 0; i < 10; i++) {
-    const a = i * Math.PI * 2 / 10 + clock * 0.4;
-    const r2 = 34 + breathe + 4 * Math.sin(clock * 5 + i);
-    ctx.beginPath();
-    ctx.moveTo(bx + Math.cos(a - 0.12) * 22, by + Math.sin(a - 0.12) * 22);
-    ctx.lineTo(bx + Math.cos(a) * r2, by + Math.sin(a) * r2);
-    ctx.lineTo(bx + Math.cos(a + 0.12) * 22, by + Math.sin(a + 0.12) * 22);
-    ctx.closePath(); ctx.fill();
-  }
-  const core = ctx.createRadialGradient(bx, by, 2, bx, by, 22);
-  core.addColorStop(0, "#3a0010");
-  core.addColorStop(1, "#0a0006");
-  ctx.fillStyle = core;
-  ctx.beginPath(); ctx.arc(bx, by, 22, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = "#ff3344"; ctx.lineWidth = 2; ctx.stroke();
-  ctx.fillStyle = "#ffffff";
-  ctx.beginPath(); ctx.ellipse(bx, by, 12, 7, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = "#ff1a2e";
-  ctx.beginPath(); ctx.arc(bx + Math.cos(ang) * 3.2, by + Math.sin(ang) * 3.2, 5, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = "#000";
-  ctx.beginPath(); ctx.arc(bx + Math.cos(ang) * 4, by + Math.sin(ang) * 4, 2.5, 0, Math.PI * 2); ctx.fill();
-  ctx.restore();
+    ctx.fillStyle = "#020805";
+    ctx.fillRect(0, 0, W, H);
+    const glow = ctx.createRadialGradient(bossX(), BOSS_Y, 10, bossX(), BOSS_Y, 260);
+    glow.addColorStop(0, f.c2 + "aa");
+    glow.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, W, H);
+    drawSpores();
 
-  // Telegraphs and attacks
-  for (const l of state.lasers) drawLaser(l, l.age <= l.warn, pulse);
-
-  // Bullets
-  drawBullets();
-
-  // Sparks and rings
-  drawFx();
-
-  // Arena border with a glow
-  ctx.save();
-  ctx.shadowColor = "#ff3344";
-  ctx.shadowBlur = 18;
-  ctx.strokeStyle = "rgba(255,255,255," + (0.7 + 0.3 * pulse) + ")";
-  ctx.lineWidth = 3;
-  ctx.strokeRect(BOX.x, BOX.y, BOX.w, BOX.h);
-  ctx.restore();
-
-  // Dash afterimages
-  for (const p of state.dashTrail) {
-    ctx.globalAlpha = Math.max(0, p.life / 0.25) * 0.45;
-    ctx.fillStyle = "#7fe8ff";
-    heartShape(p.x, p.y - 2, 7.5);
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
-
-  // Heart (flickers while invulnerable from a hit, glows cyan while dashing)
-  const dashing = state.dashT > 0;
-  if (dashing || state.invuln <= 0 || Math.floor(state.invuln * 14) % 2 === 0) {
     ctx.save();
-    ctx.shadowColor = dashing ? "#7fe8ff" : "#ff1a2e";
+    if (state.shake > 0) {
+      ctx.translate((Math.random() - 0.5) * state.shake, (Math.random() - 0.5) * state.shake);
+    }
+
+    const floor = ctx.createLinearGradient(0, BOX.y, 0, BOX.y + BOX.h);
+    floor.addColorStop(0, "#0c2214");
+    floor.addColorStop(1, "#030a05");
+    ctx.fillStyle = floor;
+    ctx.fillRect(BOX.x, BOX.y, BOX.w, BOX.h);
+    for (let x = BOX.x + 14; x < BOX.x + BOX.w; x += 28) {
+      for (let y = BOX.y + 14; y < BOX.y + BOX.h; y += 28) {
+        ctx.fillStyle = "rgba(157,255,92," + (0.06 + 0.05 * Math.sin(clock * 2 + x * 0.05 + y * 0.05)) + ")";
+        ctx.fillRect(x - 1, y - 1, 2, 2);
+      }
+    }
+
+    drawBlob(bossX(), BOSS_Y, 1, 1);
+
+    for (const l of state.lasers) drawAttack(l, l.age <= l.warn, pulse);
+    drawBullets();
+    drawFx();
+
+    ctx.save();
+    ctx.shadowColor = f.c1;
     ctx.shadowBlur = 16;
-    ctx.fillStyle = dashing ? "#d8faff" : "#ff1a2e";
-    heartShape(heart.x, heart.y - 2, 7.5);
-    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255," + (0.7 + 0.3 * pulse) + ")";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(BOX.x, BOX.y, BOX.w, BOX.h);
+    ctx.restore();
+
+    for (const p of state.dashTrail) {
+      ctx.globalAlpha = Math.max(0, p.life / 0.25) * 0.45;
+      ctx.fillStyle = "#7fe8ff";
+      heartShape(p.x, p.y - 2, 7.5);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    const dashing = state.dashT > 0;
+    if (dashing || state.invuln <= 0 || Math.floor(state.invuln * 14) % 2 === 0) {
+      ctx.save();
+      ctx.shadowColor = dashing ? "#7fe8ff" : "#ff1a2e";
+      ctx.shadowBlur = 16;
+      ctx.fillStyle = dashing ? "#d8faff" : "#ff1a2e";
+      heartShape(heart.x, heart.y - 2, 7.5);
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore();
+
+    const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 0.75);
+    vg.addColorStop(0, "rgba(0,0,0,0)");
+    vg.addColorStop(1, "rgba(0," + Math.round(30 * intensity()) + ",0," + (0.55 + 0.25 * intensity()) + ")");
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, W, H);
+    if (state.flash > 0) {
+      ctx.fillStyle = "rgba(255,0,20," + (state.flash * 0.3) + ")";
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // HUD
+    const diff = Math.round(intensity() * 100);
+    const tier = diff < 25 ? "UNEASY" : diff < 50 ? "DANGEROUS" : diff < 75 ? "HELLISH" : "HELL";
+    ctx.font = "14px 'Courier New', monospace";
+    ctx.fillStyle = "#fff";
+    ctx.textAlign = "left";
+    ctx.fillText("MODE: " + selectedDiff.toUpperCase(), BOX.x, 92);
+    ctx.textAlign = "center";
+    ctx.fillText("FORM: " + f.name, W / 2, 92);
+    ctx.textAlign = "right";
+    ctx.fillText(state.dashCd > 0 ? "DASH " + state.dashCd.toFixed(1) + "s" : "DASH READY", BOX.x + BOX.w, 92);
+
+    ctx.fillStyle = "#0a2214";
+    ctx.fillRect(BOX.x, 98, BOX.w, 8);
+    ctx.save();
+    ctx.fillStyle = diff < 50 ? f.c1 : "#ff3344";
+    ctx.shadowColor = ctx.fillStyle;
+    ctx.shadowBlur = 8;
+    ctx.fillRect(BOX.x, 98, BOX.w * diff / 100, 8);
+    ctx.restore();
+
+    ctx.fillStyle = "#fff";
+    ctx.textAlign = "left";
+    ctx.fillText("INTENSITY: " + tier + " " + diff + "%", BOX.x, 120);
+    ctx.textAlign = "right";
+    ctx.fillText("ATTACKS " + activeAttacks() + "/" + DIFF.maxAttacks, BOX.x + BOX.w, 120);
+
+    ctx.textAlign = "left";
+    ctx.fillText("HP", BOX.x, 450);
+    ctx.fillStyle = "#0a2214";
+    ctx.fillRect(BOX.x + 40, 436, 200, 18);
+    ctx.fillStyle = "#ff1a2e";
+    ctx.fillRect(BOX.x + 40, 436, 200 * (state.hp / MAX_HP), 18);
+    ctx.fillStyle = "#fff";
+    ctx.textAlign = "right";
+    ctx.fillText(state.hp + " / " + MAX_HP, BOX.x + BOX.w, 450);
+    ctx.textAlign = "left";
+    ctx.fillText("SURVIVE " + Math.max(0, Math.ceil(SURVIVE - state.time)) + "s", BOX.x, 474);
+
+    if (state.announce > 0) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, state.announce);
+      ctx.font = "bold 28px 'Courier New', monospace";
+      ctx.textAlign = "center";
+      ctx.fillStyle = f.c1;
+      ctx.shadowColor = f.c1;
+      ctx.shadowBlur = 18;
+      ctx.fillText("FORM: " + f.name, W / 2, 290);
+      ctx.restore();
+    }
+  }
+
+  function start(diff) {
+    selectedDiff = diff;
+    DIFF = PRESETS[diff];
+    reset();
+    state.running = true;
+  }
+
+  function frame(dt) {
+    clock += dt;
+    updateFx(dt);
+    if (state && state.running) update(dt);
+    if (state) draw();
+  }
+
+  return {
+    name: "SKRULL DEATH",
+    start,
+    frame,
+    setPointer: (p) => { pointerTarget = p; },
+    dash: () => tryDash(),
+    stop: () => { if (state) state.running = false; },
+    isRunning: () => !!(state && state.running)
+  };
+})();
+
+// ======================================================================
+// FIGHT 3: CRYSTAL SERAPH
+// ======================================================================
+const SERAPH = (() => {
+  const keys = input.keys;
+  const BOX = { x: 150, y: 130, w: 340, h: 280 };
+  const SERAPH_Y = 50;
+  const SURVIVE = 90;
+  const MAX_HP = 48;
+  const HIT_DMG = 4;
+  const INVULN = 0.6;
+  const SPEED = 230;
+  const DASH_SPEED = 900;
+  const DASH_TIME = 0.15;
+  const DASH_COOLDOWN = 1.0;
+  const MAX_ATTACKS_PER_TICK = 2;
+  const PHASE_TIME = 30;
+  const WIND = 70;
+
+  const PHASE_NAMES = ["I", "II", "III"];
+  // Weights per phase: crystal shower, suspension, pendulum, blizzard
+  const WEIGHTS = [
+    [1.2, 1.0, 0.0, 0.0],
+    [1.0, 1.0, 0.9, 0.7],
+    [1.2, 1.2, 1.1, 1.0]
+  ];
+
+  let DIFF = PRESETS.normal;
+  let selectedDiff = "normal";
+  let state = null, heart = null, pointerTarget = null;
+  let fx = [];
+  let clock = 0;
+  const flakes = Array.from({ length: 60 }, () => newFlake(true));
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function mod(v, m) { return ((v % m) + m) % m; }
+  function dist(ax, ay, bx, by) { return Math.hypot(ax - bx, ay - by); }
+  function intensity() { return Math.min(1, state.time / SURVIVE); }
+  function phaseIndex() { return Math.min(2, Math.floor(state.time / PHASE_TIME)); }
+  function seraphX() { return W / 2 + Math.sin(clock * 0.3) * 140; }
+  function newFlake(anywhere) {
+    return { x: rand(0, W), y: anywhere ? rand(0, H) : -10, vy: rand(20, 45), vx: rand(-12, 12),
+      s: rand(1, 2.6), a: rand(0.2, 0.6) };
+  }
+
+  function reset() {
+    state = {
+      running: false, time: 0, hp: MAX_HP, invuln: 0, shake: 0, flash: 0, cooldown: 1.0,
+      lasers: [], bullets: [], gid: 0,
+      dashCd: 0, dashT: 0, dashDx: 0, dashDy: -1, dashTrail: [],
+      phase: 0, announce: 2.5
+    };
+    heart = { x: BOX.x + BOX.w / 2, y: BOX.y + BOX.h / 2, r: 6 };
+    pointerTarget = null;
+    fx = [];
+  }
+
+  function clampHeart() {
+    heart.x = Math.max(BOX.x + heart.r, Math.min(BOX.x + BOX.w - heart.r, heart.x));
+    heart.y = Math.max(BOX.y + heart.r, Math.min(BOX.y + BOX.h - heart.r, heart.y));
+  }
+
+  function inRect(px, py, r, rect) {
+    return px > rect.x - r && px < rect.x + rect.w + r && py > rect.y - r && py < rect.y + rect.h + r;
+  }
+
+  function distToSegment(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)));
+    return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+  }
+
+  function pushLaser(l) { l.gid = ++state.gid; state.lasers.push(l); return l; }
+  function addGroup(arr) { const g = ++state.gid; for (const b of arr) b.group = g; state.bullets.push(...arr); }
+  function kindActive(kind) { return state.lasers.some(l => l.kind === kind && l.age < l.warn + l.fire + 0.1); }
+  function activeAttacks() {
+    const ids = new Set();
+    for (const l of state.lasers) if (l.age < l.warn + l.fire + 0.1) ids.add(l.gid);
+    for (const b of state.bullets) if (b.group) ids.add(b.group);
+    return ids.size;
+  }
+
+  // ---------- PARTICLES ----------
+  function burst(x, y, color, n, speed, life) {
+    for (let i = 0; i < n; i++) {
+      const a = rand(0, Math.PI * 2), sp = rand(speed * 0.3, speed);
+      fx.push({ type: "spark", x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life, max: life, color, size: rand(1.5, 3.5) });
+    }
+  }
+  function ring(x, y, r0, r1, color, life) { fx.push({ type: "ring", x, y, r0, r1, color, life, max: life }); }
+
+  function updateFx(dt) {
+    for (const p of fx) {
+      p.life -= dt;
+      if (p.type === "spark") { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.92; p.vy *= 0.92; }
+    }
+    fx = fx.filter(p => p.life > 0);
+    for (const f of flakes) {
+      f.y += f.vy * dt;
+      f.x += f.vx * dt;
+      if (f.y > H + 10) { f.y = -10; f.x = rand(0, W); }
+      if (f.x < -10) f.x = W + 10;
+      if (f.x > W + 10) f.x = -10;
+    }
+  }
+
+  function drawFx() {
+    for (const p of fx) {
+      const a = Math.max(0, p.life / p.max);
+      if (p.type === "spark") {
+        ctx.globalAlpha = a;
+        ctx.fillStyle = p.color;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.size * (0.5 + a * 0.5), 0, Math.PI * 2); ctx.fill();
+      } else {
+        const rr = p.r0 + (p.r1 - p.r0) * (1 - a);
+        ctx.globalAlpha = a;
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = 3 * a + 1;
+        ctx.beginPath(); ctx.arc(p.x, p.y, rr, 0, Math.PI * 2); ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawFlakes() {
+    for (const f of flakes) {
+      ctx.globalAlpha = f.a;
+      ctx.fillStyle = "#e8fbff";
+      ctx.fillRect(f.x, f.y, f.s, f.s);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // ---------- ATTACK CONSTRUCTORS ----------
+
+  // Crystal shower: shards are marked, fall onto each mark, and on landing leave a crystal hazard
+  function makeShards() {
+    const pts = [];
+    const n = 5 + Math.floor(intensity() * 2);
+    for (let i = 0; i < n; i++) {
+      pts.push({ x: rand(BOX.x + 16, BOX.x + BOX.w - 16), y: rand(BOX.y + 40, BOX.y + BOX.h - 30) });
+    }
+    return { kind: "shards", pts, age: 0, warn: 0.9, fire: 0.05, once: true, fired: false };
+  }
+
+  // Implosion: a ring of crystals closes in on the middle, leaving one safe lane
+  function makeImplode() {
+    return { kind: "implode", cx: BOX.x + BOX.w / 2, cy: BOX.y + BOX.h / 2, gap: rand(0, Math.PI * 2),
+      age: 0, warn: 1.0, fire: 0.05, once: true, fired: false };
+  }
+
+  // Pendulum: a crystal blade swings from a pivot above the arena
+  function makePendulum() {
+    return { kind: "pendulum", px: rand(BOX.x + 60, BOX.x + BOX.w - 60), py: BOX.y - 40, len: 300,
+      amp: rand(0.7, 0.95), age: 0, warn: 1.0, fire: 5.0 };
+  }
+  function pendulumAngle(l) {
+    return l.amp * Math.sin(2 * Math.PI * Math.max(0, l.age - l.warn) / 3.0);
+  }
+  function pendulumTip(l) {
+    const a = pendulumAngle(l);
+    return { x: l.px + Math.sin(a) * l.len, y: l.py + Math.cos(a) * l.len };
+  }
+
+  // Blizzard: a wind pushes you sideways while needles fall
+  function makeBlizzard() {
+    return { kind: "blizzard", dir: Math.random() < 0.5 ? 1 : -1, age: 0, warn: 1.0, fire: 3.0, nextAt: -1 };
+  }
+
+  // Suspension: a ring of crystals hangs in the air, then fires at wherever you are
+  function bulletsSuspend() {
+    const cx = rand(BOX.x + 50, BOX.x + BOX.w - 50), cy = rand(BOX.y + 50, BOX.y + BOX.h - 50);
+    if (dist(cx, cy, heart.x, heart.y) < 80) return [];
+    const out = [];
+    for (let i = 0; i < 8; i++) {
+      const a = i / 8 * Math.PI * 2;
+      out.push({ x: cx + Math.cos(a) * 26, y: cy + Math.sin(a) * 26, vx: 0, vy: 0, r: 6, life: 5,
+        color: "#c9f4ff", suspend: true, freeze: 1.0 + intensity() * 0.2, launched: false, launch: 230 });
+    }
+    return out;
+  }
+
+  function fireOnce(l) {
+    if (l.kind === "shards") {
+      for (const p of l.pts) {
+        state.bullets.push({ x: p.x, y: p.y - 230, vx: 0, vy: 320, r: 6, life: 3, color: "#bff4ff",
+          group: l.gid, landAt: { x: p.x, y: p.y, gid: l.gid } });
+      }
+      return;
+    }
+    if (l.kind === "implode") {
+      const n = 16, R = 230;
+      for (let i = 0; i < n; i++) {
+        const a = i / n * Math.PI * 2;
+        let d = Math.abs(a - l.gap) % (Math.PI * 2);
+        if (d > Math.PI) d = Math.PI * 2 - d;
+        if (d < 0.45) continue;
+        state.bullets.push({ x: l.cx + Math.cos(a) * R, y: l.cy + Math.sin(a) * R,
+          vx: -Math.cos(a) * 110, vy: -Math.sin(a) * 110, r: 6, life: 4, color: "#9fe8ff",
+          group: l.gid, collapse: { x: l.cx, y: l.cy } });
+      }
+      burst(l.cx, l.cy, "#9fe8ff", 10, 120, 0.3);
+    }
+  }
+
+  // ---------- ATTACK SELECTION ----------
+  function attackList() {
+    const t = state.time, w = WEIGHTS[phaseIndex()];
+    return [
+      { w: w[0], ok: () => t > 5, run: () => pushLaser(makeShards()) },
+      { w: w[1], ok: () => t > 8, run: () => addGroup(bulletsSuspend()) },
+      { w: w[2], ok: () => t > 18 && !kindActive("pendulum"), run: () => pushLaser(makePendulum()) },
+      { w: w[3], ok: () => t > 25 && !kindActive("blizzard"), run: () => pushLaser(makeBlizzard()) }
+    ];
+  }
+
+  function spawnTick() {
+    const count = Math.random() < 0.3 + intensity() * 0.4 ? 2 : 1;
+    for (let i = 0; i < Math.min(count, MAX_ATTACKS_PER_TICK); i++) {
+      if (activeAttacks() >= DIFF.maxAttacks) break;
+      const list = attackList().filter(a => a.ok());
+      const total = list.reduce((sum, a) => sum + a.w, 0);
+      let r = Math.random() * total;
+      for (const a of list) {
+        r -= a.w;
+        if (r <= 0) { a.run(); break; }
+      }
+    }
+  }
+
+  // ---------- UPDATE ----------
+  function update(dt) {
+    const s = state;
+    s.time += dt;
+    s.invuln -= dt;
+    s.shake = Math.max(0, s.shake - dt * 30);
+    s.flash = Math.max(0, s.flash - dt * 3);
+    s.announce = Math.max(0, s.announce - dt);
+
+    const p = phaseIndex();
+    if (p !== s.phase) {
+      s.phase = p;
+      s.announce = 2.5;
+      ring(seraphX(), SERAPH_Y, 20, 260, "#9fe8ff", 0.9);
+      burst(seraphX(), SERAPH_Y, "#9fe8ff", 24, 200, 0.6);
+    }
+
+    let dx = 0, dy = 0;
+    if (keys["ArrowLeft"] || keys["KeyA"]) dx -= 1;
+    if (keys["ArrowRight"] || keys["KeyD"]) dx += 1;
+    if (keys["ArrowUp"] || keys["KeyW"]) dy -= 1;
+    if (keys["ArrowDown"] || keys["KeyS"]) dy += 1;
+    if (dx || dy) {
+      const m = Math.hypot(dx, dy);
+      s.dashDx = dx / m;
+      s.dashDy = dy / m;
+      if (s.dashT <= 0) {
+        heart.x += (dx / m) * SPEED * dt;
+        heart.y += (dy / m) * SPEED * dt;
+      }
+    }
+
+    s.dashCd -= dt;
+    if (s.dashT > 0) {
+      s.dashT -= dt;
+      heart.x += s.dashDx * DASH_SPEED * dt;
+      heart.y += s.dashDy * DASH_SPEED * dt;
+      s.dashTrail.push({ x: heart.x, y: heart.y, life: 0.25 });
+    }
+    if (pointerTarget && s.dashT <= 0) {
+      const ease = Math.min(1, dt * 18);
+      heart.x += (pointerTarget.x - heart.x) * ease;
+      heart.y += (pointerTarget.y - heart.y) * ease;
+    }
+    clampHeart();
+    s.dashTrail = s.dashTrail.filter(q => (q.life -= dt) > 0);
+
+    s.cooldown -= dt;
+    if (s.cooldown <= 0) {
+      spawnTick();
+      s.cooldown = Math.max(0.35, rand(0.6, 1.2) - intensity() * 0.6) * DIFF.spawn;
+    }
+
+    for (const l of s.lasers) {
+      if (!l.scaled) { l.scaled = true; l.warn *= DIFF.warn; }
+      l.age += dt;
+
+      if (l.kind === "blizzard") {
+        if (l.age > l.warn && l.age < l.warn + l.fire) {
+          heart.x += l.dir * WIND * dt;
+          clampHeart();
+          if (l.nextAt < 0) l.nextAt = l.warn;
+          if (l.age >= l.nextAt) {
+            l.nextAt += 0.35;
+            for (let i = 0; i < 2; i++) {
+              s.bullets.push({ x: rand(BOX.x + 10, BOX.x + BOX.w - 10), y: BOX.y - 10, vx: l.dir * 30, vy: 150,
+                r: 4, life: 4, color: "#e6fbff", group: l.gid });
+            }
+          }
+        }
+        continue;
+      }
+
+      if (l.kind === "pendulum") {
+        if (l.age > l.warn && l.age < l.warn + l.fire) {
+          const tip = pendulumTip(l);
+          if (distToSegment(heart.x, heart.y, l.px, l.py, tip.x, tip.y) < heart.r + 9) damage();
+        }
+        continue;
+      }
+
+      if (l.kind === "crystal") {
+        if (l.age > l.warn && l.age < l.warn + l.fire && dist(heart.x, heart.y, l.x, l.y) < l.r + heart.r) damage();
+        continue;
+      }
+      if (l.once && !l.fired && l.age >= l.warn) {
+        l.fired = true;
+        fireOnce(l);
+      }
+    }
+    s.lasers = s.lasers.filter(l => l.age < l.warn + l.fire + 0.1);
+
+    for (const b of s.bullets) {
+      if (b.suspend) {
+        if (b.freeze > 0) b.freeze -= dt;
+        if (b.freeze <= 0 && !b.launched) {
+          b.launched = true;
+          const ang = Math.atan2(heart.y - b.y, heart.x - b.x);
+          b.vx = Math.cos(ang) * b.launch;
+          b.vy = Math.sin(ang) * b.launch;
+        }
+      }
+      b.x += b.vx * dt * DIFF.speed;
+      b.y += b.vy * dt * DIFF.speed;
+      b.life -= dt;
+
+      b.trail = b.trail || [];
+      b.trail.push({ x: b.x, y: b.y });
+      if (b.trail.length > 5) b.trail.shift();
+
+      if (b.landAt && b.y >= b.landAt.y) {
+        b.dead = true;
+        state.lasers.push({ kind: "crystal", x: b.landAt.x, y: b.landAt.y, r: 22, gid: b.landAt.gid,
+          age: 0, warn: 0.2, fire: 2.0, scaled: false });
+        burst(b.landAt.x, b.landAt.y, "#bff4ff", 14, 140, 0.4);
+      }
+      if (b.collapse && dist(b.x, b.y, b.collapse.x, b.collapse.y) < 36) b.dead = true;
+      if (!b.dead && dist(b.x, b.y, heart.x, heart.y) < b.r + heart.r - 2) {
+        b.dead = true;
+        damage();
+      }
+    }
+    s.bullets = s.bullets.filter(b => !b.dead && b.life > 0 &&
+      b.x > -200 && b.x < W + 200 && b.y > -200 && b.y < H + 200);
+
+    if (s.time >= SURVIVE && s.running) {
+      s.running = false;
+      endFight("YOU SURVIVED", "Survived " + SURVIVE + " of " + SURVIVE + " seconds.");
+    }
+  }
+
+  function tryDash() {
+    if (!state || !state.running || state.dashCd > 0) return;
+    state.dashT = DASH_TIME;
+    state.dashCd = DASH_COOLDOWN;
+    burst(heart.x, heart.y, "#7fe8ff", 10, 120, 0.35);
+  }
+
+  function damage() {
+    if (!state.running || state.invuln > 0 || state.dashT > 0) return;
+    state.hp -= HIT_DMG;
+    state.invuln = INVULN;
+    state.shake = 14;
+    state.flash = 1;
+    burst(heart.x, heart.y, "#9fe8ff", 22, 200, 0.6);
+    ring(heart.x, heart.y, 6, 70, "#9fe8ff", 0.45);
+    burst(heart.x, heart.y, "#ff1a2e", 14, 180, 0.5);
+    if (state.hp <= 0) {
+      state.hp = 0;
+      state.running = false;
+      endFight("YOU DIED", "Survived " + Math.floor(state.time) + " of " + SURVIVE + " seconds.");
+    }
+  }
+
+  // ---------- DRAWING ----------
+  function seg(x1, y1, x2, y2) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); }
+
+  function drawWarnLine(x1, y1, x2, y2, color, alpha, width) {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = alpha;
+    ctx.lineWidth = width;
+    ctx.setLineDash([10, 8]);
+    ctx.lineDashOffset = -clock * 80;
+    seg(x1, y1, x2, y2);
     ctx.restore();
   }
 
-  ctx.restore();
+  function heartShape(x, y, s) {
+    ctx.beginPath();
+    ctx.moveTo(x, y + s * 0.35);
+    ctx.bezierCurveTo(x, y - s * 0.2, x - s, y - s * 0.2, x - s, y + s * 0.1);
+    ctx.bezierCurveTo(x - s, y + s * 0.6, x, y + s * 0.8, x, y + s);
+    ctx.bezierCurveTo(x, y + s * 0.8, x + s, y + s * 0.6, x + s, y + s * 0.1);
+    ctx.bezierCurveTo(x + s, y - s * 0.2, x, y - s * 0.2, x, y + s * 0.35);
+    ctx.closePath();
+  }
 
-  // Vignette, darker and redder as the fight intensifies
-  const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 0.75);
-  vg.addColorStop(0, "rgba(0,0,0,0)");
-  vg.addColorStop(1, "rgba(" + Math.round(40 * intensity()) + ",0,0," + (0.55 + 0.25 * intensity()) + ")");
-  ctx.fillStyle = vg;
+  function drawBlade(x1, y1, x2, y2) {
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "#5fc8ea";
+    ctx.globalAlpha = 0.35; ctx.lineWidth = 22; seg(x1, y1, x2, y2);
+    ctx.globalAlpha = 0.8; ctx.lineWidth = 9; seg(x1, y1, x2, y2);
+    ctx.globalAlpha = 1; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 3; seg(x1, y1, x2, y2);
+    ctx.restore();
+  }
+
+  function drawAttack(l, warning, pulse) {
+    if (l.kind === "crystal") {
+      const k = warning ? Math.max(0.2, l.age / l.warn) : 1;
+      const fade = warning ? 1 : Math.max(0, Math.min(1, (l.warn + l.fire - l.age) / 0.4));
+      ctx.save();
+      ctx.globalAlpha = fade;
+      ctx.translate(l.x, l.y);
+      ctx.scale(k, k);
+      ctx.beginPath();
+      for (let i = 0; i < 12; i++) {
+        const a = i / 12 * Math.PI * 2 - Math.PI / 2;
+        const r = (i % 2 === 0 ? l.r : l.r * 0.45) * (1 + 0.04 * Math.sin(clock * 6 + i));
+        const px = Math.cos(a) * r, py = Math.sin(a) * r;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      if (warning) {
+        ctx.setLineDash([5, 5]);
+        ctx.lineDashOffset = -clock * 40;
+        ctx.strokeStyle = "rgba(191,244,255," + (0.4 + 0.5 * pulse) + ")";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      } else {
+        const g = ctx.createRadialGradient(0, 0, 2, 0, 0, l.r);
+        g.addColorStop(0, "rgba(255,255,255,0.95)");
+        g.addColorStop(0.5, "rgba(127,232,255,0.8)");
+        g.addColorStop(1, "rgba(29,75,107,0.6)");
+        ctx.shadowColor = "#9fe8ff";
+        ctx.shadowBlur = 14;
+        ctx.fillStyle = g;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = "rgba(255,255,255,0.8)";
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      }
+      ctx.restore();
+      return;
+    }
+    if (l.kind === "shards") {
+      if (warning) {
+        const k = l.age / l.warn;
+        for (const p of l.pts) {
+          ctx.save();
+          ctx.setLineDash([6, 8]);
+          ctx.lineDashOffset = -clock * 60;
+          ctx.strokeStyle = "rgba(159,232,255," + (0.3 + 0.4 * pulse) + ")";
+          ctx.lineWidth = 1.5;
+          seg(p.x, BOX.y, p.x, p.y);
+          ctx.restore();
+          ctx.fillStyle = "rgba(191,244,255," + (0.3 + 0.6 * k) + ")";
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y - 7); ctx.lineTo(p.x + 4, p.y); ctx.lineTo(p.x, p.y + 7); ctx.lineTo(p.x - 4, p.y);
+          ctx.closePath(); ctx.fill();
+        }
+      }
+      return;
+    }
+
+    if (l.kind === "implode") {
+      if (warning) {
+        const k = l.age / l.warn;
+        ctx.fillStyle = "rgba(159,232,255,0.08)";
+        ctx.beginPath(); ctx.moveTo(l.cx, l.cy);
+        ctx.arc(l.cx, l.cy, 240, l.gap - 0.45, l.gap + 0.45);
+        ctx.closePath(); ctx.fill();
+        ctx.save();
+        ctx.setLineDash([10, 10]);
+        ctx.lineDashOffset = -clock * 80;
+        ctx.strokeStyle = "rgba(159,232,255,0.7)";
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(l.cx, l.cy, 230 - 120 * k, 0, Math.PI * 2); ctx.stroke();
+        ctx.restore();
+      }
+      return;
+    }
+
+    if (l.kind === "pendulum") {
+      if (warning) {
+        ctx.save();
+        ctx.setLineDash([6, 8]);
+        ctx.lineDashOffset = -clock * 50;
+        ctx.strokeStyle = "rgba(159,232,255," + (0.35 + 0.35 * pulse) + ")";
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(l.px, l.py, l.len, Math.PI / 2 - l.amp, Math.PI / 2 + l.amp); ctx.stroke();
+        ctx.restore();
+      } else {
+        const tip = pendulumTip(l);
+        drawBlade(l.px, l.py, tip.x, tip.y);
+      }
+      ctx.fillStyle = "#e8fbff";
+      ctx.beginPath(); ctx.arc(l.px, l.py, 5, 0, Math.PI * 2); ctx.fill();
+      return;
+    }
+
+    if (l.kind === "blizzard") {
+      if (warning) {
+        ctx.save();
+        ctx.fillStyle = "rgba(230,251,255," + (0.3 + 0.5 * pulse) + ")";
+        for (let i = 0; i < 4; i++) {
+          const y = BOX.y + 40 + i * 70;
+          const x = l.dir > 0 ? BOX.x + 12 : BOX.x + BOX.w - 12;
+          ctx.beginPath();
+          ctx.moveTo(x - l.dir * 8, y - 6); ctx.lineTo(x + l.dir * 8, y); ctx.lineTo(x - l.dir * 8, y + 6);
+          ctx.closePath(); ctx.fill();
+        }
+        ctx.restore();
+      } else {
+        ctx.save();
+        ctx.strokeStyle = "rgba(230,251,255,0.45)";
+        ctx.lineWidth = 1.5;
+        for (let k = 0; k < 22; k++) {
+          const x = BOX.x + mod(k * 37 + clock * 140 * l.dir, BOX.w);
+          const y = BOX.y + mod(k * 71 + clock * 220, BOX.h);
+          seg(x, y, x + l.dir * 14, y + 10);
+        }
+        ctx.restore();
+      }
+    }
+  }
+
+  function drawBullets() {
+    for (const b of state.bullets) {
+      const c = b.color || "#ffffff";
+      if (b.trail) {
+        for (let i = 0; i < b.trail.length; i++) {
+          const tp = b.trail[i], f = (i + 1) / b.trail.length;
+          ctx.globalAlpha = f * 0.3;
+          ctx.fillStyle = c;
+          ctx.beginPath(); ctx.arc(tp.x, tp.y, b.r * (0.4 + 0.6 * f), 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      if (b.landAt) {
+        ctx.save();
+        ctx.strokeStyle = "rgba(191,244,255,0.85)";
+        ctx.lineWidth = 2.5;
+        ctx.shadowColor = "#9fe8ff";
+        ctx.shadowBlur = 8;
+        seg(b.x, b.y - 12, b.x, b.y + 4);
+        ctx.restore();
+      }
+      if (b.suspend && !b.launched) {
+        ctx.globalAlpha = 0.9;
+        ctx.strokeStyle = "rgba(159,232,255,0.9)";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.r + 3, 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.globalAlpha = 0.25;
+      ctx.fillStyle = c;
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 2.3, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 0.45, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawSeraph(bx, by) {
+    const ang = Math.atan2(heart.y - by, heart.x - bx);
+    // halo
+    ctx.save();
+    ctx.strokeStyle = "rgba(159,232,255,0.85)";
+    ctx.lineWidth = 2;
+    ctx.shadowColor = "#9fe8ff";
+    ctx.shadowBlur = 12;
+    ctx.beginPath(); ctx.ellipse(bx, by - 38, 22, 6, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+
+    // faceted crystal body
+    const verts = [];
+    for (let i = 0; i < 8; i++) {
+      const a = i / 8 * Math.PI * 2 + clock * 0.4;
+      const r = i % 2 === 0 ? 34 : 22;
+      verts.push({ x: bx + Math.cos(a) * r, y: by + Math.sin(a) * r });
+    }
+    ctx.save();
+    ctx.beginPath();
+    verts.forEach((v, i) => { if (i === 0) ctx.moveTo(v.x, v.y); else ctx.lineTo(v.x, v.y); });
+    ctx.closePath();
+    const g = ctx.createLinearGradient(bx, by - 34, bx, by + 34);
+    g.addColorStop(0, "#e8fbff");
+    g.addColorStop(0.5, "#5fc8ea");
+    g.addColorStop(1, "#1d4b6b");
+    ctx.shadowColor = "#9fe8ff";
+    ctx.shadowBlur = 20;
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    for (const v of verts) seg(bx, by, v.x, v.y);
+    ctx.restore();
+
+    // eyes that watch the heart
+    for (const side of [-9, 9]) {
+      const ex = bx + side, ey = by - 3;
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath(); ctx.arc(ex, ey, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#1d4b6b";
+      ctx.beginPath(); ctx.arc(ex + Math.cos(ang) * 1.6, ey + Math.sin(ang) * 1.6, 2, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  function draw() {
+    const pulse = 0.5 + 0.5 * Math.sin(clock * 12);
+
+    ctx.fillStyle = "#03080f";
+    ctx.fillRect(0, 0, W, H);
+    const glow = ctx.createRadialGradient(seraphX(), SERAPH_Y, 10, seraphX(), SERAPH_Y, 280);
+    glow.addColorStop(0, "rgba(120,220,255,0.22)");
+    glow.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, W, H);
+    drawFlakes();
+
+    ctx.save();
+    if (state.shake > 0) {
+      ctx.translate((Math.random() - 0.5) * state.shake, (Math.random() - 0.5) * state.shake);
+    }
+
+    const floor = ctx.createLinearGradient(0, BOX.y, 0, BOX.y + BOX.h);
+    floor.addColorStop(0, "#0b2233");
+    floor.addColorStop(1, "#03060b");
+    ctx.fillStyle = floor;
+    ctx.fillRect(BOX.x, BOX.y, BOX.w, BOX.h);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(BOX.x, BOX.y, BOX.w, BOX.h); ctx.clip();
+    ctx.strokeStyle = "rgba(159,232,255,0.07)";
+    ctx.lineWidth = 1;
+    const off = mod(clock * 30, 40);
+    for (let i = -BOX.h; i < BOX.w + BOX.h; i += 40) {
+      seg(BOX.x + i + off, BOX.y, BOX.x + i + off + BOX.h, BOX.y + BOX.h);
+    }
+    ctx.restore();
+
+    drawSeraph(seraphX(), SERAPH_Y);
+
+    for (const l of state.lasers) drawAttack(l, l.age <= l.warn, pulse);
+    drawBullets();
+    drawFx();
+
+    ctx.save();
+    ctx.shadowColor = "#9fe8ff";
+    ctx.shadowBlur = 16;
+    ctx.strokeStyle = "rgba(255,255,255," + (0.7 + 0.3 * pulse) + ")";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(BOX.x, BOX.y, BOX.w, BOX.h);
+    ctx.restore();
+
+    for (const q of state.dashTrail) {
+      ctx.globalAlpha = Math.max(0, q.life / 0.25) * 0.45;
+      ctx.fillStyle = "#7fe8ff";
+      heartShape(q.x, q.y - 2, 7.5);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    const dashing = state.dashT > 0;
+    if (dashing || state.invuln <= 0 || Math.floor(state.invuln * 14) % 2 === 0) {
+      ctx.save();
+      ctx.shadowColor = dashing ? "#7fe8ff" : "#ff1a2e";
+      ctx.shadowBlur = 16;
+      ctx.fillStyle = dashing ? "#d8faff" : "#ff1a2e";
+      heartShape(heart.x, heart.y - 2, 7.5);
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore();
+
+    const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 0.75);
+    vg.addColorStop(0, "rgba(0,0,0,0)");
+    vg.addColorStop(1, "rgba(0," + Math.round(20 * intensity()) + "," + Math.round(40 * intensity()) + "," + (0.55 + 0.25 * intensity()) + ")");
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, W, H);
+    if (state.flash > 0) {
+      ctx.fillStyle = "rgba(255,0,20," + (state.flash * 0.3) + ")";
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // HUD
+    const diff = Math.round(intensity() * 100);
+    const tier = diff < 25 ? "UNEASY" : diff < 50 ? "DANGEROUS" : diff < 75 ? "HELLISH" : "HELL";
+    ctx.font = "14px 'Courier New', monospace";
+    ctx.fillStyle = "#fff";
+    ctx.textAlign = "left";
+    ctx.fillText("MODE: " + selectedDiff.toUpperCase(), BOX.x, 92);
+    ctx.textAlign = "center";
+    ctx.fillText("PHASE " + PHASE_NAMES[phaseIndex()], W / 2, 92);
+    ctx.textAlign = "right";
+    ctx.fillText(state.dashCd > 0 ? "DASH " + state.dashCd.toFixed(1) + "s" : "DASH READY", BOX.x + BOX.w, 92);
+
+    ctx.fillStyle = "#0b2233";
+    ctx.fillRect(BOX.x, 98, BOX.w, 8);
+    ctx.save();
+    ctx.fillStyle = diff < 50 ? "#9fe8ff" : "#ff3344";
+    ctx.shadowColor = ctx.fillStyle;
+    ctx.shadowBlur = 8;
+    ctx.fillRect(BOX.x, 98, BOX.w * diff / 100, 8);
+    ctx.restore();
+
+    ctx.fillStyle = "#fff";
+    ctx.textAlign = "left";
+    ctx.fillText("INTENSITY: " + tier + " " + diff + "%", BOX.x, 120);
+    ctx.textAlign = "right";
+    ctx.fillText("ATTACKS " + activeAttacks() + "/" + DIFF.maxAttacks, BOX.x + BOX.w, 120);
+
+    ctx.textAlign = "left";
+    ctx.fillText("HP", BOX.x, 450);
+    ctx.fillStyle = "#0b2233";
+    ctx.fillRect(BOX.x + 40, 436, 200, 18);
+    ctx.fillStyle = "#ff1a2e";
+    ctx.fillRect(BOX.x + 40, 436, 200 * (state.hp / MAX_HP), 18);
+    ctx.fillStyle = "#fff";
+    ctx.textAlign = "right";
+    ctx.fillText(state.hp + " / " + MAX_HP, BOX.x + BOX.w, 450);
+    ctx.textAlign = "left";
+    ctx.fillText("SURVIVE " + Math.max(0, Math.ceil(SURVIVE - state.time)) + "s", BOX.x, 474);
+
+    if (state.announce > 0) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, state.announce);
+      ctx.font = "bold 28px 'Courier New', monospace";
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#9fe8ff";
+      ctx.shadowColor = "#9fe8ff";
+      ctx.shadowBlur = 18;
+      ctx.fillText("PHASE " + PHASE_NAMES[phaseIndex()], W / 2, 290);
+      ctx.restore();
+    }
+  }
+
+  function start(diff) {
+    selectedDiff = diff;
+    DIFF = PRESETS[diff];
+    reset();
+    state.running = true;
+  }
+
+  function frame(dt) {
+    clock += dt;
+    updateFx(dt);
+    if (state && state.running) update(dt);
+    if (state) draw();
+  }
+
+  return {
+    name: "CRYSTAL SERAPH",
+    start,
+    frame,
+    setPointer: (p) => { pointerTarget = p; },
+    dash: () => tryDash(),
+    stop: () => { if (state) state.running = false; },
+    isRunning: () => !!(state && state.running)
+  };
+})();
+
+// ---------- MENU BACKGROUND ----------
+const menuDust = Array.from({ length: 80 }, () => ({
+  x: Math.random() * W, y: Math.random() * H, vy: 6 + Math.random() * 18,
+  s: 0.8 + Math.random() * 2.2, c: ["#ff3344", "#9dff5c", "#9fe8ff"][Math.floor(Math.random() * 3)]
+}));
+let menuClock = 0;
+function drawMenu(dt) {
+  menuClock += dt;
+  ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, W, H);
-  if (state.flash > 0) {
-    ctx.fillStyle = "rgba(255,0,20," + (state.flash * 0.3) + ")";
+  const tints = [[255, 51, 68], [157, 255, 92], [159, 232, 255]];
+  for (let i = 0; i < 3; i++) {
+    const cx = W * (0.2 + 0.3 * i) + Math.sin(menuClock * 0.4 + i * 2) * 60;
+    const cy = H * 0.5 + Math.cos(menuClock * 0.3 + i) * 60;
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, 260);
+    g.addColorStop(0, "rgba(" + tints[i].join(",") + ",0.18)");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
   }
-
-  // HUD
-  const diff = Math.round(intensity() * 100);
-  const tier = diff < 25 ? "UNEASY" : diff < 50 ? "DANGEROUS" : diff < 75 ? "HELLISH" : "HELL";
-  ctx.font = "14px 'Courier New', monospace";
-  ctx.fillStyle = "#fff";
-  ctx.textAlign = "left";
-  ctx.fillText("MODE: " + selectedDiff.toUpperCase(), BOX.x, 92);
-  ctx.textAlign = "right";
-  ctx.fillText(state.dashCd > 0 ? "DASH " + state.dashCd.toFixed(1) + "s" : "DASH READY", BOX.x + BOX.w, 92);
-
-  ctx.fillStyle = "#2a0a10";
-  ctx.fillRect(BOX.x, 98, BOX.w, 8);
-  ctx.save();
-  ctx.fillStyle = diff < 50 ? "#ffaa33" : "#ff3344";
-  ctx.shadowColor = ctx.fillStyle;
-  ctx.shadowBlur = 8;
-  ctx.fillRect(BOX.x, 98, BOX.w * diff / 100, 8);
-  ctx.restore();
-
-  ctx.fillStyle = "#fff";
-  ctx.textAlign = "left";
-  ctx.fillText("INTENSITY: " + tier + " " + diff + "%", BOX.x, 120);
-  ctx.textAlign = "right";
-  ctx.fillText("ATTACKS " + activeAttacks() + "/" + DIFF.maxAttacks, BOX.x + BOX.w, 120);
-
-  ctx.textAlign = "left";
-  ctx.fillText("HP", BOX.x, 450);
-  ctx.fillStyle = "#2a0a10";
-  ctx.fillRect(BOX.x + 40, 436, 200, 18);
-  ctx.fillStyle = "#ff1a2e";
-  ctx.fillRect(BOX.x + 40, 436, 200 * (state.hp / MAX_HP), 18);
-  ctx.fillStyle = "#fff";
-  ctx.textAlign = "right";
-  ctx.fillText(state.hp + " / " + MAX_HP, BOX.x + BOX.w, 450);
-  ctx.textAlign = "left";
-  ctx.fillText("SURVIVE " + Math.max(0, Math.ceil(SURVIVE - state.time)) + "s", BOX.x, 474);
-  if (state.stretchT > 0) {
-    ctx.fillStyle = "#7fd7ff";
-    ctx.textAlign = "right";
-    ctx.fillText(state.stretchAxis === "h" ? "ARENA STRETCH: WIDE" : "ARENA STRETCH: TALL", BOX.x + BOX.w, 474);
+  ctx.globalAlpha = 0.5;
+  for (const d of menuDust) {
+    d.y -= d.vy * dt;
+    if (d.y < -5) { d.y = H + 5; d.x = Math.random() * W; }
+    ctx.fillStyle = d.c;
+    ctx.fillRect(d.x, d.y, d.s, d.s);
   }
+  ctx.globalAlpha = 1;
 }
 
-// ---------- LOOP & INPUT ----------
-function showOverlay(title, msg) {
-  titleEl.textContent = title;
-  msgEl.textContent = msg;
-  overlay.classList.remove("hidden");
-}
-
-function startGame(diff) {
-  if (diff) selectedDiff = diff;
-  DIFF = PRESETS[selectedDiff];
-  reset();
-  state.running = true;
-  overlay.classList.add("hidden");
-}
-
+// ---------- MAIN LOOP ----------
 let last = performance.now();
 function loop(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
-  clock += dt;
-  updateFx(dt);
-  if (state.running) update(dt);
-  draw();
+  if (active) active.frame(dt);
+  else drawMenu(dt);
   requestAnimationFrame(loop);
 }
+
+showFightSelect();
 requestAnimationFrame(loop);
-
-diffRow.addEventListener("click", (e) => {
-  const d = e.target.dataset.diff;
-  if (d) startGame(d);
-});
-
-window.addEventListener("keydown", (e) => {
-  keys[e.code] = true;
-  if (e.key === "Shift") tryDash();
-  if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].includes(e.key)) e.preventDefault();
-  if (e.key === "Enter" && !state.running && !overlay.classList.contains("hidden")) startGame();
-});
-window.addEventListener("keyup", (e) => { keys[e.code] = false; });
-window.addEventListener("blur", () => { keys = {}; pointerTarget = null; });
-
-function toArena(clientX, clientY) {
-  const rect = canvas.getBoundingClientRect();
-  return { x: (clientX - rect.left) * (W / rect.width), y: (clientY - rect.top) * (H / rect.height) };
-}
-canvas.addEventListener("pointerdown", (e) => { pointerTarget = toArena(e.clientX, e.clientY); });
-canvas.addEventListener("pointermove", (e) => { if (e.buttons || e.pointerType === "touch") pointerTarget = toArena(e.clientX, e.clientY); });
-canvas.addEventListener("pointerup", () => { pointerTarget = null; });
-canvas.addEventListener("pointerleave", () => { pointerTarget = null; });
 </script>
 </body>
 </html>
